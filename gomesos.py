@@ -212,7 +212,7 @@ class GoMesosJobRunner(AsynchronousJobRunner):
    #####se si vogliono aggiungere utility di Chronos####
     def list(self,job_name):
         """List all jobs on Chronos."""
-        return self._call("/scheduler/jobs/"+job_name, "GET")
+        return self._call("/scheduler/job/search?name="+job_name, "GET")
 
     def __get_k8s_job_spec_template(self, job_wrapper):
         """The k8s spec template is nothing but a Pod spec, except that it is nested and does not have an apiversion
@@ -299,15 +299,25 @@ class GoMesosJobRunner(AsynchronousJobRunner):
         # TODO check if this is correct
         return job_wrapper.job_destination.id
    ###############################################################################################################
-    
+    ####Response {:orig-content-encoding nil,
+    #              :request-time 121
+     #             :status 400
+       #           :headers {"Server" "Jetty(8.y.z-SNAPSHOT"
+       #                     "Connection" "close"
+       #                     "Content-Length" "0"
+       #                     "Content-Type" "text/html;charset=ISO-8859-1"
+       #                     "Cache-Control" "must-revalidate,no-cache,no-store"}
+       #         :body ""}
+    ####
     def check_watched_item(self, job_state):
         """Checks the state of a job already submitted on Gomesos. Job state is a AsynchronousJobState"""
          gomesos_job_name=self.__produce_gomesos_job_name(job_state.job_wrapper.get_id_tag())
-         json_job_data_resp=self.chronos_cli.get (gomesos_job_name)
+         json_job_data_resp=self.chronos_cli.list(gomesos_job_name)
          
          response=json_job_data_resp.json()
 
-        if len(jobs.response['items']) == 1:
+        if len(response['successCount'] == 1:
+            #avvisa Chronos del successo ( per job asincroni con una PUT)
             job = Job(self._pykube_api, jobs.response['items'][0])
             job_destination = job_state.job_wrapper.job_destination
             succeeded = 0
