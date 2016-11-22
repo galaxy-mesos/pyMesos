@@ -375,10 +375,7 @@ class GoMesosJobRunner(AsynchronousJobRunner):
     def recover(self, job, job_wrapper):
         """Recovers jobs stuck in the queued/running state when Galaxy started"""
         # TODO this needs to be implemented to override unimplemented base method
-        job_id = job.get_job_runner_external_id() # o job_wrapper.job_id  penso sia la stessa cosa
-        if job_id is None:
-            self.put(job_wrapper)
-            return
+        job_id = job_wrapper.job_id  
         ajs = AsynchronousJobState(files_dir=job_wrapper.working_directory, job_wrapper=job_wrapper)
         ajs.job_id = str(job_id)
         ajs.command_line = job.command_line
@@ -408,7 +405,6 @@ class GoMesosJobRunner(AsynchronousJobRunner):
             return
 
         job_destination = job_wrapper.job_destination
-  
         job_id = self.post_task(job_wrapper)   #----> crea il chronos job e lo invia a chronos
         if not job_id:
             log.debug("Job creation faliure!! No Response from GoMesos")
