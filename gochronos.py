@@ -47,11 +47,10 @@ class ChronosClient(object):
     _password = None
 
     def __init__(self, servers, proto="https", username=None, password=None, level='WARN'):
-        #server_list = servers if isinstance(servers, list) else [servers]
-        #self.servers = ["%s://%s" % (proto, server) for server in server_list]
+        #I have to optimize this part
         self.chronos = ["https://172.30.67.7:4443"]
-        self.master_ip = ["https://172.30.67.7:5050"]
-        self.slaves= ["https://172.30.67.5:5051","https://172.30.67.4:5051"] #slaves[i] = slave(i) 
+        self.master_ip = ["http://172.30.67.7:5050"]
+        self.slaves= ["http://172.30.67.5:5051","http://172.30.67.4:5051"] #slaves[i] = slave(i) 
         if username and password:
             self._user = username
             self._password = password
@@ -120,24 +119,6 @@ class ChronosClient(object):
     def job_stat(self, name):
         """ List stats for a job """
         return self._call('/scheduler/job/stat/%s' % name, "GET")
-
-    def scheduler_stat_99th(self):
-        return self._call('/scheduler/stats/99thPercentile', 'GET')
-
-    def scheduler_stat_98th(self):
-        return self._call('/scheduler/stats/98thPercentile', 'GET')
-
-    def scheduler_stat_95th(self):
-        return self._call('/scheduler/stats/95thPercentile', 'GET')
-
-    def scheduler_stat_75th(self):
-        return self._call('/scheduler/stats/75thPercentile', 'GET')
-
-    def scheduler_stat_median(self):
-        return self._call('/scheduler/stats/median', 'GET')
-
-    def scheduler_stat_mean(self):
-        return self._call('/scheduler/stats/mean', 'GET')
 
     def call_master(self,url,method="GET", body=None, headers={}):
         result = None
@@ -336,7 +317,7 @@ class GoChronosJobRunner(AsynchronousJobRunner):
             for mesos_job in mesos_jobs['tasks']:
                 if chronos_task_name == mesos_job['name']:
                     chronos_framework_id.append(mesos_node['framework_id'])
-        """ return framework id"""
+        """ return framework id as for example 92a5f9dd-84f6-4be0-b388-250d0b99a972-0001"""
         return chronos_framework_id
 
     def _obtain_chronos_jobs_nodes(self, job_id):
@@ -353,7 +334,7 @@ class GoChronosJobRunner(AsynchronousJobRunner):
                         for mesos_node in mesos_nodes['slaves']:
                             if mesos_node['id'] == mesos_job['slave_id']:
                                 chronos_nodes_hostname.append(mesos_node['id'])
-        """ return ip address of slave"""
+        """ return id of slave as for example be2aa3da-cb77-4eeb-a04a-22ef9a49634e-S0 """
         return chronos_nodes_hostname
 
     def post_task(self, job_wrapper):
@@ -362,7 +343,7 @@ class GoChronosJobRunner(AsynchronousJobRunner):
         """
         # Get the params from <destination> tag in job_conf by using job_destination.params[param]
         if self.chronos_cli:
-          log.debug(" CHRONOS CLI esisteee!\n")
+          log.debug(" CHRONOS exists\n")
         job_destination = job_wrapper.job_destination
         try:
            mesos_task_cpu = int(job_destination.params["mesos_task_cpu"])
@@ -387,13 +368,7 @@ class GoChronosJobRunner(AsynchronousJobRunner):
            log.debug("work dir: %s",workingDirectory)
         except:
            log.debug("Docker_image not specified in Job config and Tool config!!")
-           
-           """try:
-                log.debug(self.runner_params["gomesos_docker_project"])
-                project = str(self.runner_params["gomesos_docker_project"])
-            except KeyError:
-                log.debug("gomesosdocker_project not defined, using defaults")
-           """
+          
         volumes = []
         try:
             if (job_destination.params["gochronos_volumes_containerPath"]):
