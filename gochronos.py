@@ -496,20 +496,6 @@ class GoChronosJobRunner(AsynchronousJobRunner):
                 return False
         return True
 
-   ###############################################################################################################
-   # [{"name":"SAMPLE_JOB1","command":"echo 'ROXANNE ROXANNE ROXANNE'","shell":true,"epsilon":"PT60S","executor":"","executorFlags":"",
-   #"taskInfoData":"","retries":2,"owner":"gallitelli@live.com",
-   #"ownerName":"","description":"","async":true,"successCount":0,"errorCount":0,"lastSuccess":"","lastError":"","cpus":0.1,
-   #"disk":256.0,"mem":128.0,"disabled":false,"softError":false,"dataProcessingJobType":false,"errorsSinceLastSuccess":0,
-   #"fetch":   [],"uris":[],"environmentVariables":[],"arguments":[],"highPriority":false,"runAsUser":"root","constraints":[],"schedule":
-   #"R1//PT10M","scheduleTimeZone":""},{"name":"test","command":
-   #"echo hello","shell":true,"epsilon":"PT30M","executor":"","executorFlags":"",
-   #"taskInfoData":"","retries":2,"owner":"marica.antonacci@gmail.com",
-#"ownerName":"","description":"","async":false,"successCount":1,"errorCount":0,"lastSuccess":"2016-11-15T09:51:39.560Z","lastError":"",
-#"cpus":0.1,"disk":256.0,"mem":128.0,"disabled":true,"softError":false,"dataProcessingJobType":false,"errorsSinceLastSuccess":0,"fetch":[],"uris":[],"environmentVariables":[],"arguments":[],"highPriority":false,"runAsUser":"root","constraints":[],"schedule":"R0/2016-11-16T09:51:17.000Z/PT24H","scheduleTimeZone":""}](.venv)galaxy@galaxy:~$ 
-
-
-  ###############################################################################################
     def check_watched_item(self, job_state):
         log.debug("Checks the state of a job already submitted on GoChronos. Job state is a AsynchronousJobState\n")
         log.debug("job_state.job_wrapper.job_id %d" % job_state.job_wrapper.job_id)
