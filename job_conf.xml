@@ -48,7 +48,7 @@
             <param id="docker_enabled">true</param>
             <param id="gochronos_default_container_id">libmesos/ubuntu</param>  <!--
               Specify the image on which the jobs have to be executed -->
-            <param id="gochronos_volumes_containerPath">/data</param>
+            <param id="gochronos_volumes_containerPath">/home/galaxy/galaxy</param>
             <param id="gochronos_volumes_hostPath">/home/galaxy/galaxy</param>
            
             <param id="virtualenv">false</param>
