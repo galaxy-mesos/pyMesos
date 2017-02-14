@@ -36,20 +36,25 @@ except ImportError as exc:
 class ChronosAPIError(Exception):
      pass
 
+class UnauthorizedError(Exception):
+     pass
+
+
 log = logging.getLogger(__name__)
 
 __all__ = ['GoChronosJobRunner']
 
-gochronos_exit_job_code={}
+
 
 class ChronosClient(object):
     _user = None
     _password = None
 
-    def __init__(self, servers, proto="https", username=None, password=None, level='WARN'):
-        #I have to optimize this part
-        self.chronos = ["https://172.30.67.7:4443"]
-        self.master_ip = ["http://172.30.67.7:5050"]
+    def __init__(self, servers, username=None, password=None, level='WARN'):
+        #server_list = servers if isinstance(servers, list) else [servers]
+        #self.servers = ["%s://%s" % (proto, server) for server in server_list]
+        self.chronos = "https://172.30.67.7:4443"
+        self.master = "http://172.30.67.7:5050"
         self.slaves= ["http://172.30.67.5:5051","http://172.30.67.4:5051"] #slaves[i] = slave(i) 
         if username and password:
             self._user = username
@@ -59,39 +64,49 @@ class ChronosClient(object):
 
     def _list_all(self):
         """List all jobs on Chronos."""
-        return self._call("/scheduler/jobs", "GET")
+        return self._call( self.chronos+"/scheduler/jobs", "GET")
 
     def _list(self,job_name):
         """List all jobs on Chronos."""
-        return self._call("/scheduler/jobs/search?name="+job_name, "GET")
+        return self._call(self.chronos+"/scheduler/jobs/search?name="+job_name, "GET")
 
     def _list_jobs_graph(self):
         """ Send command /scheduler/graph/csv  and  returns  data  as 
              node,myjob1,fresh,running
              node,myjob2,failure,idle """
-        return self._call('/scheduler/graph/csv', "GET")
+        return self._call(self.chronos+'/scheduler/graph/csv', "GET")
   
     def _obtain_mesos_jobs(self):
         """Obtains the list of jobs in Mesos"""
-        return self._call_master('/master/tasks.json',"GET")
+        return self._call(self.master+'/master/tasks.json',"GET")
 
     def _obtain_mesos_nodes(self):
         """Obtains the list of nodes in Mesos"""
-        return self._call_master('/master/slaves',"GET")
+        return self._call(self.master +'/master/slaves',"GET")
+
+    def _obtain_chronos_slaveX_state(self, slaveX):
+       """get the state info of a slave X"""
+       if slaveX == "slave(0)":
+         slave=self.slaves[0]
+       else:
+         slave=self.slaves[1]
+       path = slave+"/"+slaveX+"/state"
+       log.debug( "PATH_STATE is %s", path)
+       return self._call(path,GET)
 
     def get(self,name):
         """List name job on Chronos."""
-        path = "/scheduler/job/%s" % name
+        path = self.chronos+"/scheduler/job/%s" % name
         return self._call(path, "GET")
 
     def delete(self, name):
         """Delete a job by name"""
-        path = "/scheduler/job/%s" % name
+        path = self.chronos+"/scheduler/job/%s" % name
         return self._call(path, "DELETE")
 
     def delete_tasks(self, name):
         """Terminate all tasks for a running/stuck job"""
-        path = "/scheduler/task/kill/%s" % name
+        path = self.chronos+"/scheduler/task/kill/%s" % name
         return self._call(path, "DELETE")
 
     def run(self, name):
@@ -101,10 +116,10 @@ class ChronosClient(object):
 
     def add(self, job_def, update=False):
         log.debug("Schedule a new job")
-        path = "/scheduler/iso8601"
+        path = self.chronos + "/scheduler/iso8601"
         self._check_fields(job_def)
         if "parents" in job_def:
-            path = "/scheduler/dependency"
+            path = self.chronos+"/scheduler/dependency"
         if update:
             method = "PUT"
         else:
@@ -119,6 +134,24 @@ class ChronosClient(object):
     def job_stat(self, name):
         """ List stats for a job """
         return self._call('/scheduler/job/stat/%s' % name, "GET")
+
+    def scheduler_stat_99th(self):
+        return self._call('/scheduler/stats/99thPercentile', 'GET')
+
+    def scheduler_stat_98th(self):
+        return self._call('/scheduler/stats/98thPercentile', 'GET')
+
+    def scheduler_stat_95th(self):
+        return self._call('/scheduler/stats/95thPercentile', 'GET')
+
+    def scheduler_stat_75th(self):
+        return self._call('/scheduler/stats/75thPercentile', 'GET')
+
+    def scheduler_stat_median(self):
+        return self._call('/scheduler/stats/median', 'GET')
+
+    def scheduler_stat_mean(self):
+        return self._call('/scheduler/stats/mean', 'GET')
 
     def call_master(self,url,method="GET", body=None, headers={}):
         result = None
@@ -150,12 +183,18 @@ class ChronosClient(object):
         if body:
             log.debug("Body: %s" % body)
         conn = httplib2.Http(disable_ssl_certificate_validation=True)
-        if self._user and self._password:
+        #log.debug("FIND: %s" % self.chronos)
+        #log.debug("FIND: %d" % url.find(self.chronos))
+        
+        if (url.find(self.chronos) >= 0):
+          if self._user and self._password:
+            #log.debug("Credentials set!")
             conn.add_credentials(self._user, self._password)
 
         response = None
-        server=self.chronos
-        endpoint = "%s%s" % (server, url)
+        #server=self.chronos
+        endpoint = "%s" % (url)
+        #endpoint = "%s%s" % (server, url)
         try:
                 resp, content = conn.request(endpoint, method, body=body, headers=hdrs)
         except (socket.error, httplib2.ServerNotFoundError) as e:
@@ -176,7 +215,7 @@ class ChronosClient(object):
         payload = None
 
         if status == 401:
-            raise UnauthorizedError()
+            raise UnauthorizedError('Not Authorized,look your credentials!')
 
         if content:
             try:
@@ -267,7 +306,7 @@ class GoChronosJobRunner(AsynchronousJobRunner):
         
         log.debug("Creo l'oggetto Chronos client")
         
-        self.chronos_cli = ChronosClient(self.runner_params["chronos_server"], proto="https", username=self.runner_params["user"],
+        self.chronos_cli = ChronosClient(self.runner_params["chronos_server"], username=self.runner_params["user"],
                            password=self.runner_params["password"])
         
         
@@ -300,32 +339,36 @@ class GoChronosJobRunner(AsynchronousJobRunner):
             self.monitor_queue.put(ajs)
         return None 
 
-    def connect(servers, proto="https", username="admin", password=None):
-        return ChronosClient(servers, proto=proto, username=username, password=password)
+    def connect(servers, username="admin", password=None):
+        return ChronosClient(servers, username=username, password=password)
 
     def __produce_gochronos_job_name(self, job_id):
         # wrapper.get_id_tag() instead of job_id for compatibility with TaskWrappers.
         return "ChronosTask_" + str(job_id)
 
-    def _obtain_chronos_jobs_frameworks(self, job_id):
+    def _obtain_chronos_job_sandbox_path(self, job_id):
         '''Method to obtain the slaves' hostnames that are executing chronos jobs'''
-        mesos_jobs = self.chronos_cli._obtain_mesos_jobs()
-        chronos_framework_id = []
+        slaveX=self._obtain_chronos_jobs_nodes(job_id)
 
-        chronos_task_name = "ChronosTask:ChronosTask_" + str(job_id)
-        if mesos_jobs:
-            for mesos_job in mesos_jobs['tasks']:
-                if chronos_task_name == mesos_job['name']:
-                    chronos_framework_id.append(mesos_node['framework_id'])
-        """ return framework id as for example 92a5f9dd-84f6-4be0-b388-250d0b99a972-0001"""
-        return chronos_framework_id
+        chronos_task_name = "ChronosTask:" + self.chronos_cli._produce_gochronos_job_name(job_id)
+        if slaveX:
+            state_info=self.chronos_cli._obtain_chronos_slaveX_state(slaveX) #http://172.30.67.4:5051/slave(1)/state
+            for framework  in state_jobs['completed_frameworks']:
+              for executor  in framework['completed_executors']:
+                 for task in executor['completed_task']:
+                     if chronos_task_name == task['name']:
+                       chronos_job_sandbox_path=task['directory']
+        """/var/lib/mesos/slaves/"+ task['slave_id'] + "/frameworks/" + task['framework_id'] + \
+        "/executors/"+ task['id']+"/runs/"+ task['container']"""
+        
+        return chronos_job_sandbox_path
 
     def _obtain_chronos_jobs_nodes(self, job_id):
         '''Method to obtain the slaves' hostnames that are executing chronos jobs'''
         mesos_jobs = self.chronos_cli._obtain_mesos_jobs()
-        chronos_nodes_hostname = []
+        chronos_job_slave = []
 
-        chronos_task_name = "ChronosTask:ChronosTask_" + str(job_id)
+        chronos_task_name = "ChronosTask:" + self.chronos_cli._produce_gochronos_job_name(job_id)
         if mesos_jobs:
             for mesos_job in mesos_jobs['tasks']:
                 if chronos_task_name == mesos_job['name']:
@@ -333,9 +376,13 @@ class GoChronosJobRunner(AsynchronousJobRunner):
                     if mesos_nodes:
                         for mesos_node in mesos_nodes['slaves']:
                             if mesos_node['id'] == mesos_job['slave_id']:
-                                chronos_nodes_hostname.append(mesos_node['id'])
-        """ return id of slave as for example be2aa3da-cb77-4eeb-a04a-22ef9a49634e-S0 """
-        return chronos_nodes_hostname
+                                #"pid":"slave(1)@172.30.67.4:5051"--->slave(1)
+                                pid=mesos_node['pid']
+                                pos=pid.find("@")
+                                chronos_job_slave.append(pid[:pos])
+                                log.debug("JOB SLAVE IS %s", chronos_job_slave)
+        """ return slave(1)"""
+        return chronos_job_slave
 
     def post_task(self, job_wrapper):
         """ Sumbit job to Mesos cluster and return jobid
@@ -343,7 +390,7 @@ class GoChronosJobRunner(AsynchronousJobRunner):
         """
         # Get the params from <destination> tag in job_conf by using job_destination.params[param]
         if self.chronos_cli:
-          log.debug(" CHRONOS exists\n")
+          log.debug(" CHRONOS CLI esisteee!\n")
         job_destination = job_wrapper.job_destination
         try:
            mesos_task_cpu = int(job_destination.params["mesos_task_cpu"])
@@ -368,7 +415,13 @@ class GoChronosJobRunner(AsynchronousJobRunner):
            log.debug("work dir: %s",workingDirectory)
         except:
            log.debug("Docker_image not specified in Job config and Tool config!!")
-          
+           
+           """try:
+                log.debug(self.runner_params["gomesos_docker_project"])
+                project = str(self.runner_params["gomesos_docker_project"])
+            except KeyError:
+                log.debug("gomesosdocker_project not defined, using defaults")
+           """
         volumes = []
         try:
             if (job_destination.params["gochronos_volumes_containerPath"]):
@@ -446,25 +499,29 @@ class GoChronosJobRunner(AsynchronousJobRunner):
                         log.debug("TROVATO %s", job_id)# properties[3] --> Job state
                         return properties[3]
     
-    def create_log_file(self,job_wrapper):
+    def create_log_file(self,job_wrapper,returncode):
         """ Create log files in galaxy, namely error_file, output_file, exit_code_file
             Return true, if all the file creations are successful
         """
         path = None
+        path_sandbox = None
         job_destination=job_wrapper.job_destination
         job_name=self.__produce_gochronos_job_name(job_wrapper.job_id)
-        if (job_destination.params["docker_enable"]==true):
-           slave_id= _obtain_chronos_jobs_nodes(job_wrapper.job_id)
-           framework_id= _obtain_chronos_jobs_framework(job_wrapper.job_id)
-                #path = str(job_destination.params["gochronos_volumes_hostPath"])
-           path="/var/lib/mesos/slaves/"+ slave_id +
-                #be2aa3da-cb77-4eeb-a04a-22ef9a49634e-S0
-                "/frameworks/"+ framework_id +"/executors/*"+job_name+"*/runs/latest"
-                #92a5f9dd-84f6-4be0-b388-250d0b99a972-0001/executors/*job_name*/runs/latest
-         """under latest are stderr e stdout"""
+        if job_destination.params["docker_enabled"]:
+           path_sandbox=self._obtain_chronos_job_sandbox_path(job_wrapper.job_id)
+           log.debug("SANDBOX path: %s",path_sandbox)        
+           """under path_sandbox there are stderr e stdout"""
+        if path_sandbox:
+            slaveX=self._obtain_chronos_jobs_nodes(job_wrapper.job_id)
+            if slaveX == "slave(0)":
+               slave=self.chronos_cli.slaves[0]
+            else:
+               slave=self.chronos_cli.slaves[1]
+
+            path=slave+"/files/download?path="+path_sandbox
         if path:
-            chroj_output_file = path + "/database/files/000/"
-            chroj_error_file = path + "/god.err"
+            chroj_output_file = self._chronos_cli._call(path + "stdout","GET")
+            chroj_error_file = self._chronos_cli._call(path + "stderr","GET")
             
         try:
                 # Read from GoChronos output_file and write it into galaxy output_file.
@@ -482,7 +539,7 @@ class GoChronosJobRunner(AsynchronousJobRunner):
                 log_file.close()
                 f.close()
                 # Read from GoMesos exit_code and write it into galaxy exit_code_file.
-                out_log = gochronos_exit_job_code[job_state.job_id]  #204/500/etc..DA VEDERE COME PRENDERLI!
+                out_log = returncode  #OK or ERROR
                 log_file = open(job_state.exit_code_file, "w")
                 log_file.write(out_log)
                 log_file.close()
@@ -496,6 +553,20 @@ class GoChronosJobRunner(AsynchronousJobRunner):
                 return False
         return True
 
+   ###############################################################################################################
+   # [{"name":"SAMPLE_JOB1","command":"echo 'ROXANNE ROXANNE ROXANNE'","shell":true,"epsilon":"PT60S","executor":"","executorFlags":"",
+   #"taskInfoData":"","retries":2,"owner":"gallitelli@live.com",
+   #"ownerName":"","description":"","async":true,"successCount":0,"errorCount":0,"lastSuccess":"","lastError":"","cpus":0.1,
+   #"disk":256.0,"mem":128.0,"disabled":false,"softError":false,"dataProcessingJobType":false,"errorsSinceLastSuccess":0,
+   #"fetch":   [],"uris":[],"environmentVariables":[],"arguments":[],"highPriority":false,"runAsUser":"root","constraints":[],"schedule":
+   #"R1//PT10M","scheduleTimeZone":""},{"name":"test","command":
+   #"echo hello","shell":true,"epsilon":"PT30M","executor":"","executorFlags":"",
+   #"taskInfoData":"","retries":2,"owner":"marica.antonacci@gmail.com",
+#"ownerName":"","description":"","async":false,"successCount":1,"errorCount":0,"lastSuccess":"2016-11-15T09:51:39.560Z","lastError":"",
+#"cpus":0.1,"disk":256.0,"mem":128.0,"disabled":true,"softError":false,"dataProcessingJobType":false,"errorsSinceLastSuccess":0,"fetch":[],"uris":[],"environmentVariables":[],"arguments":[],"highPriority":false,"runAsUser":"root","constraints":[],"schedule":"R0/2016-11-16T09:51:17.000Z/PT24H","scheduleTimeZone":""}](.venv)galaxy@galaxy:~$ 
+
+
+  ###############################################################################################
     def check_watched_item(self, job_state):
         log.debug("Checks the state of a job already submitted on GoChronos. Job state is a AsynchronousJobState\n")
         log.debug("job_state.job_wrapper.job_id %d" % job_state.job_wrapper.job_id)
@@ -516,14 +587,14 @@ class GoChronosJobRunner(AsynchronousJobRunner):
                 job_state.running = False
                 job_state.job_wrapper.change_state(model.Job.states.OK)
                 job_chronos_status="OK"
-                #self.create_log_file(job_state.job_wrapper, job_chronos_status)
+                self.create_log_file(job_state.job_wrapper, job_chronos_status)
                 self.mark_as_finished(job_state)
                 return None
             elif failed:
                 job_state.running = False
                 job_state.job_wrapper.change_state(model.Job.states.ERROR)
                 job_chronos_status="ERROR"
-                #self.create_log_file(job_state.job_wrapper, job_chronos_status)
+                self.create_log_file(job_state.job_wrapper, job_chronos_status)
                 self.mark_as_failed(job_state)
                 return None
             elif self._get_chronos_job_state(gomesos_job_name) == "running":
@@ -540,14 +611,14 @@ class GoChronosJobRunner(AsynchronousJobRunner):
 
         elif len(response) == 0:
             # there is no job responding to this job_id, it is either lost or something happened.
-            #self.create_log_file(job_state,"ERROR")
+            self.create_log_file(job_state,"ERROR")
             self.mark_as_failed(job_state)
             return job_state
         else:
             # there is more than one job associated to the expected unique job id used as selector.
             log.error("There is more than one Chronos Job associated to job id " + job_state.job_id)
             job_state.job_wrapper.change_state(model.Job.states.ERROR)
-            #self.create_log_file(job_state,"ERROR")
+            self.create_log_file(job_state,"ERROR")
             self.mark_as_failed(job_state)
             return job_state
 
