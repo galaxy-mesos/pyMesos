@@ -1,0 +1,201 @@
+[
+    {
+        "Id": "3cf3e2eb3202183ebe5c5df8034e7752657ed790155ff00c083685df9433b17f",
+        "Created": "2017-02-03T11:23:13.832446974Z",
+        "Path": "/bin/sh",
+        "Args": [
+            "-c",
+            "/bin/bash mkdir -p working; cd working; /home/galaxy/galaxy/database/jobs_directory/000/198/tool_script.sh; return_code=$?; sh -c \"exit $return_code\""
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2017-02-03T11:23:15.879158804Z",
+            "FinishedAt": "2017-02-03T11:23:16.024515102Z"
+        },
+        "Image": "sha256:ae6ee9d67277807002ab103b565324b732f4ec07db7607e1ad8b6da1d217604c",
+        "ResolvConfPath": "/var/lib/docker/containers/3cf3e2eb3202183ebe5c5df8034e7752657ed790155ff00c083685df9433b17f/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/3cf3e2eb3202183ebe5c5df8034e7752657ed790155ff00c083685df9433b17f/hostname",
+        "HostsPath": "/var/lib/docker/containers/3cf3e2eb3202183ebe5c5df8034e7752657ed790155ff00c083685df9433b17f/hosts",
+        "LogPath": "/var/lib/docker/containers/3cf3e2eb3202183ebe5c5df8034e7752657ed790155ff00c083685df9433b17f/3cf3e2eb3202183ebe5c5df8034e7752657ed790155ff00c083685df9433b17f-json.log",
+        "Name": "/mesos-be2aa3da-cb77-4eeb-a04a-22ef9a49634e-S0.adb39bcf-1185-4f48-80e6-3df31fcbd654",
+        "RestartCount": 0,
+        "Driver": "aufs",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/home/galaxy/galaxy:/home/galaxy/galaxy:rw",
+                "/var/lib/mesos/slaves/be2aa3da-cb77-4eeb-a04a-22ef9a49634e-S0/docker/links/adb39bcf-1185-4f48-80e6-3df31fcbd654:/mnt/mesos/sandbox"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "host",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "CapAdd": null,
+            "CapDrop": null,
+            "Dns": [],
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "Isolation": "",
+            "CpuShares": 102,
+            "Memory": 134217728,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": null,
+            "BlkioDeviceReadBps": null,
+            "BlkioDeviceWriteBps": null,
+            "BlkioDeviceReadIOps": null,
+            "BlkioDeviceWriteIOps": null,
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DiskQuota": 0,
+            "KernelMemory": 0,
+            "MemoryReservation": 0,
+            "MemorySwap": -1,
+            "MemorySwappiness": -1,
+            "OomKillDisable": false,
+            "PidsLimit": 0,
+            "Ulimits": null,
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0
+        },
+        "GraphDriver": {
+            "Name": "aufs",
+            "Data": null
+        },
+        "Mounts": [
+            {
+                "Source": "/home/galaxy/galaxy",
+                "Destination": "/home/galaxy/galaxy",
+                "Mode": "rw",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Source": "/var/lib/mesos/slaves/be2aa3da-cb77-4eeb-a04a-22ef9a49634e-S0/docker/links/adb39bcf-1185-4f48-80e6-3df31fcbd654",
+                "Destination": "/mnt/mesos/sandbox",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "mesos-s0",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": true,
+            "AttachStderr": true,
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "CHRONOS_RESOURCE_DISK=256.0",
+                "HOST=172.30.67.5",
+                "CHRONOS_JOB_OWNER=null",
+                "CHRONOS_JOB_RUN_TIME=1486120985928",
+                "CHRONOS_JOB_NAME=ChronosTask_198",
+                "CHRONOS_RESOURCE_CPU=0.1",
+                "mesos_task_id=ct:1486120985928:0:ChronosTask_198:",
+                "CHRONOS_JOB_RUN_ATTEMPT=0",
+                "CHRONOS_RESOURCE_MEM=128.0",
+                "MESOS_SANDBOX=/mnt/mesos/sandbox",
+                "MESOS_CONTAINER_NAME=mesos-be2aa3da-cb77-4eeb-a04a-22ef9a49634e-S0.adb39bcf-1185-4f48-80e6-3df31fcbd654",
+                "HOME=/",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Cmd": [
+                "-c",
+                "/bin/bash mkdir -p working; cd working; /home/galaxy/galaxy/database/jobs_directory/000/198/tool_script.sh; return_code=$?; sh -c \"exit $return_code\""
+            ],
+            "Image": "libmesos/ubuntu",
+            "Volumes": null,
+            "WorkingDir": "",
+            "Entrypoint": [
+                "/bin/sh"
+            ],
+            "OnBuild": null,
+            "Labels": {},
+            "StopSignal": "SIGTERM"
+        },
+        "NetworkSettings": {
+            "Bridge": "",
+            "SandboxID": "f84b2b69630946b043a5c73f76930c7958f0fba4ae4ff3253c34564931ad2042",
+            "HairpinMode": false,
+            "LinkLocalIPv6Address": "",
+            "LinkLocalIPv6PrefixLen": 0,
+            "Ports": null,
+            "SandboxKey": "/var/run/docker/netns/default",
+            "SecondaryIPAddresses": null,
+            "SecondaryIPv6Addresses": null,
+            "EndpointID": "",
+            "Gateway": "",
+            "GlobalIPv6Address": "",
+            "GlobalIPv6PrefixLen": 0,
+            "IPAddress": "",
+            "IPPrefixLen": 0,
+            "IPv6Gateway": "",
+            "MacAddress": "",
+            "Networks": {
+                "host": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "NetworkID": "39c606fd4f756687dc793fda41347e8b3e56990075531735bb18fb273b8c7422",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "MacAddress": ""
+                }
+            }
+        }
+    }
+]
