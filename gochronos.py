@@ -1,5 +1,6 @@
 #!/home/galaxy/galaxy/.venv/bin/python
-"""Offload jobs to a Mesos cluster.
+"""
+Offload jobs to a Mesos cluster.
 """
 
 
