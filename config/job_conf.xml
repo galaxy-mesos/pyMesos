@@ -55,12 +55,29 @@
             <!-- If a tool execution in container requires galaxy virtualenv, 
                  then enable it by setting the value to true.
                  Disable venv by setting the value to false.
+             -->            
+        </destination>
+        <destination id="smalt_container" runner="gochronos">
+            <param id="mesos_task_cpu">0.1</param>
+            <param id="mesos_task_mem">128</param>
+            <param id="mesos_task_disk">256</param>
+            <param id="docker_enabled">true</param>
+            <param id="gochronos_default_container_id">apetkau/smalt-galaxy</param>  <!--
+              Specify the image on which the jobs have to be executed -->
+            <param id="gochronos_volumes_containerPath">/home/galaxy/galaxy</param>
+            <param id="gochronos_volumes_hostPath">/home/galaxy/galaxy</param>
+
+            <param id="virtualenv">false</param>
+            <!-- If a tool execution in container requires galaxy virtualenv, 
+                 then enable it by setting the value to true.
+                 Disable venv by setting the value to false.
             -->
         </destination>
     </destinations>
     <tools>
       <tool id="GoChHello_id" destination="gochronos_container"/>
       <tool id="GoChCat_id" destination="gochronos_container"/>
+      <tool id="smalt_wrapper (docker)" destination="smalt_container"/>
       <tool id="upload1" destination="local"/>
     </tools>
     <limits> 
