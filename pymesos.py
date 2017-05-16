@@ -4,10 +4,12 @@
 
 
 import logging
+import socket
 import httplib2
 import json
 
 import time
+import os
 import inspect
 import requests
 from datetime import datetime
@@ -18,9 +20,9 @@ from galaxy.jobs.runners import AsynchronousJobState, AsynchronousJobRunner
 from os import environ as os_environ
 from six import text_type
 from requests import Request, Session
-
+from galaxy.util import specs
 from base64 import b64encode
-
+from bioblend import galaxy
 
 
 # Chronos package imports:
@@ -33,6 +35,34 @@ except ImportError as exc:
                           'this feature, please install it or correct the '
                           'following error:\nImportError %s' % str(exc))
 
+DEFAULT_GALAXY_HOME = "/home/galaxy/galaxy"
+
+MESOS_PARAM_SPECS = dict(
+    password_chronos=dict(
+        map=specs.to_str_or_none,
+        default=None
+    ),
+    user_chronos=dict(
+        map=specs.to_str_or_none,
+        default=None,
+    ),
+    slaves_list=dict(
+        map=specs.to_str_or_none,
+        default=None,
+    ),
+    master_server=dict(
+        map=specs.to_str_or_none,
+        default=None,
+    ),
+    chronos_server=dict(
+        map=specs.to_str_or_none,
+        default=None,
+    ),
+    galaxy_url=dict(
+        map=specs.to_str_or_none,
+        default=None,
+    ),
+)
 class ChronosAPIError(Exception):
      pass
 
@@ -50,17 +80,24 @@ class ChronosClient(object):
     _user = None
     _password = None
 
-    def __init__(self, servers, username=None, password=None, level='WARN'):
-        #server_list = servers if isinstance(servers, list) else [servers]
-        #self.servers = ["%s://%s" % (proto, server) for server in server_list]
-        self.chronos = "https://172.30.67.7:4443"
-        self.master = "http://172.30.67.7:5050"
-        self.slaves= ["172.30.67.5:5051","172.30.67.4:5051"] #slaves[i] = slave(1) always! 
+    def __init__(self,chronos_server,master_server,slaves_list=[], username=None, password=None, level='WARN'):
+       
+        self.chronos = chronos_server
+        log.debug('CHRONOS SERVER is %s', chronos_server)
+        #self.master = "http://172.30.67.7:5050"
+        self.master = master_server
+        log.debug('MASTER SERVER is %s', master_server)
+        #self.slaves= ["http://172.30.67.5:5051","http://172.30.67.4:5051"] #slaves[i] = slave(1) always!
+        
+        self.slaves=slaves_list.split(",")
+        for slave in self.slaves:
+            log.debug('SLAVE LIST ARE %s', slave)
         if username and password:
-            self._user = username
-            self._password = password
+            self._user_chronos = username
+            self._password_chronos = password
         logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s', level=level)
         self.logger = logging.getLogger(__name__)
+
 
     def _list_all(self):
         """List all jobs on Chronos."""
@@ -88,10 +125,12 @@ class ChronosClient(object):
        """get the state info of a slave slaveX_hostname is slave(1)@172.30.67.4:5051"""
        pos=slaveX_hostname.find("@")
        slaveX=slaveX_hostname[:pos]
-       if slaveX_hostname.find(self.slaves[0])>=0:
-         slave="http://"+self.slaves[0]
+       slave_ip=self.slaves[0].replace("http://","")
+       log.debug("SLAVE IP IS %s",slave_ip)
+       if slaveX_hostname.find(slave_ip)>=0:
+          slave=self.slaves[0]
        else:
-         slave="http://"+self.slaves[1]
+          slave=self.slaves[1]
        path = slave+"/"+slaveX+"/state"
        log.debug( "PATH_STATE is %s", path)
        return self._call(path,"GET")
@@ -162,18 +201,16 @@ class ChronosClient(object):
         if body:
             log.debug("Body: %s" % body)
         conn = httplib2.Http(disable_ssl_certificate_validation=True)
-        #log.debug("FIND: %s" % self.chronos)
-        #log.debug("FIND: %d" % url.find(self.chronos))
         
         if (url.find(self.chronos) >= 0):
-          if self._user and self._password:
-            #log.debug("Credentials set!")
-            conn.add_credentials(self._user, self._password)
+          if self._user_chronos and self._password_chronos:
+            log.debug("Credentials set!")
+            conn.add_credentials(self._user_chronos, self._password_chronos)
 
         response = None
-        #server=self.chronos
+       
         endpoint = "%s" % (url)
-        #endpoint = "%s%s" % (server, url)
+       
         try:
                 resp, content = conn.request(endpoint, method, body=body, headers=hdrs)
         except (socket.error, httplib2.ServerNotFoundError) as e:
@@ -199,9 +236,9 @@ class ChronosClient(object):
         if content:
             try:
                 payload = json.loads(content)
+                log.debug("Response valid json: %s" % content)
             except ValueError:
                 log.debug("Response not valid json: %s" % content)
-                #self.logger.error("Response not valid json: %s" % content)
                 payload = content
 
         if payload is None and status != 204:
@@ -271,20 +308,24 @@ class PyMesosJobRunner(AsynchronousJobRunner):
     """
     runner_name = "PyMesosRunner"
 
-    def __init__(self, app, nworkers, **kwargs):
+    def __init__(self, app, nworkers, **kwds):
         assert chronos is not None, PYMESOS_IMPORT_MESSAGE
         log.debug("Loading app %s", app)
-        runner_param_specs = dict(chronos_server=dict(map=str),user=dict(map=str), password=dict(map=str))
-            
-        if 'runner_param_specs' not in kwargs:
-            kwargs['runner_param_specs'] = dict()
-        kwargs['runner_param_specs'].update(runner_param_specs)
 
-        """Start the job runner parent object """
-        super(PyMesosJobRunner, self).__init__(app, nworkers, **kwargs)
+        super( PyMesosJobRunner, self ).__init__( app, nworkers, runner_param_specs=MESOS_PARAM_SPECS, **kwds )
         
-        self.chronos_cli = ChronosClient(self.runner_params["chronos_server"], username=self.runner_params["user"],
-                           password=self.runner_params["password"])
+        galaxy_url = self.runner_params.galaxy_url
+        if not galaxy_url:
+            galaxy_url = app.config.galaxy_infrastructure_url
+        log.debug("GALAXY URL %s",galaxy_url)
+        self.galaxy_url = galaxy_url
+        self.galaxy_inst = galaxy.GalaxyInstance(self.galaxy_url, key='GALAXY_ADMIN_API_KEY')
+
+        self.chronos_cli = ChronosClient(self.runner_params.chronos_server,
+                                         self.runner_params.master_server,
+                                         self.runner_params.slaves_list,
+                                         username=self.runner_params.user_chronos,
+                                         password=self.runner_params.password_chronos)
         
         
         if not self.chronos_cli:
@@ -293,8 +334,55 @@ class PyMesosJobRunner(AsynchronousJobRunner):
             
             self._init_monitor_thread()
             self._init_worker_threads()
-       
 
+    def add_chronos_dataset(self,struct,file_name,url):
+        struct.append({'file_name': file_name, 'url': url}) 
+
+    def list_galaxy_jobs(self):
+        return self.galaxy_inst.jobs.get_jobs()
+
+    def get_galaxy_dataset_info(self,id):
+        return self.galaxy_inst.datasets.show_dataset(id)
+    
+
+    def get_galaxy_job_input_info (self,encoded_job_id):
+
+       job_data=self.galaxy_inst.jobs.show_job(encoded_job_id,full_details=True)
+       input_dataset_ids=[]
+       chronos_inputs_dataset=[]
+       if job_data:
+            for key in job_data['inputs'].iterkeys():
+                input_dataset_ids.append(job_data['inputs'][key]['id'])
+                log.debug('INPUT ID %s',job_data['inputs'][key]['id'])
+       if input_dataset_ids:
+          for id in input_dataset_ids:
+               dataset_input_info=self.get_galaxy_dataset_info(id)
+               pos=dataset_input_info["file_name"].find("dataset_")
+               file_name=dataset_input_info["file_name"][pos:]
+               log.debug("FILENAME INPUT %s", file_name)
+               url=dataset_input_info["download_url"]
+               self.add_chronos_dataset(chronos_inputs_dataset,file_name,url)
+
+       return chronos_inputs_dataset
+
+    def get_galaxy_job_output_info (self,encoded_job_id):
+
+      job_data=self.galaxy_inst.jobs.show_job(encoded_job_id,full_details=True)
+      output_dataset_ids=[]
+      chronos_outputs_dataset=[]
+      if job_data:
+            for key in job_data['outputs'].iterkeys():
+               output_dataset_ids.append(job_data['outputs'][key]['id'])
+      if output_dataset_ids:         
+         for id in output_dataset_ids:
+               dataset_output_info=self.get_galaxy_dataset_info(id)
+               pos=dataset_output_info["file_name"].find("dataset_")
+               file_name=dataset_output_info["file_name"][pos:]
+               self.add_chronos_dataset(chronos_outputs_dataset,file_name,url="")
+
+      return chronos_outputs_dataset
+
+      
     def queue_job(self, job_wrapper):
         """Create Chronos job and submit it to Mesos cluster"""
         # prepare the job
@@ -303,7 +391,6 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         log.debug("Starting queue_job for job " + job_wrapper.get_id_tag())
         if not self.prepare_job(job_wrapper, include_metadata=False, include_work_dir_outputs=False):
             return
-
         job_destination = job_wrapper.job_destination
         job_id = self.post_task(job_wrapper)
         if not job_id:
@@ -327,27 +414,22 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         '''Method to obtain the slaves' hostnames that are executing chronos jobs'''
         slaveX_hostname=self._obtain_chronos_jobs_nodes(job_id)
 
-        #chronos_job_sandbox_path=[]
-
         chronos_task_name = "ChronosTask:" + self._produce_pymesos_job_name(job_id)
         log.debug("chronos_task_name is %s", chronos_task_name)
-        
+        chronos_job_sandbox_path="No Path"
         state_info=self.chronos_cli._obtain_chronos_slaveX_state(slaveX_hostname)
         if state_info:
             log.debug("SONO NELLO STATE")
             
             for framework  in state_info['completed_frameworks']:
-              log.debug("LUNGHEZZA DEI COMPL EXEC %d",len(framework['completed_executors']))
+              log.debug("LUNGHEZZA DEI COMPLETED EXECUTORS %d",len(framework['completed_executors']))
               for executor in framework['completed_executors']:
-                     task_item=executor['completed_tasks'][0]
+                     for task_item in executor['completed_tasks']:
                      
-                     if (chronos_task_name == task_item['name']):
-                        log.debug("SANDBOX PATH IS %s:", executor['directory'])
-                        chronos_job_sandbox_path = executor['directory']
+                       if (chronos_task_name == task_item['name']):
+                           log.debug("SANDBOX PATH IS %s:", executor['directory'])
+                           chronos_job_sandbox_path = executor['directory']
                         
-        """/var/lib/mesos/slaves/"+ task['slave_id'] + "/frameworks/" + task['framework_id'] + \
-        "/executors/"+ task['id']+"/runs/"+ task['container']"""
-        
         return chronos_job_sandbox_path
 
     def _obtain_chronos_jobs_nodes(self, job_id):
@@ -362,14 +444,30 @@ class PyMesosJobRunner(AsynchronousJobRunner):
                     if mesos_nodes:
                         for mesos_node in mesos_nodes['slaves']:
                             if mesos_node['id'] == mesos_job['slave_id']:
-                                #"pid":"slave(1)@172.30.67.4:5051"--->slave(1)
-                                """pid=mesos_node['pid']
-                                pos=pid.find("@")
-                                chronos_job_slave=pid[:pos]"""
+                               
                                 chronos_job_slave=mesos_node['pid']
                                 log.debug("JOB SLAVE IS %s", chronos_job_slave)
-        """ return slave(1)"""
+
         return chronos_job_slave
+
+    def get_galaxy_encoded_job_id(self, base_command):
+        '''xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'''
+        galaxy_jobs = self.list_galaxy_jobs()
+        if galaxy_jobs:
+       
+            for job  in galaxy_jobs:
+                
+                if job["command_line"] == base_command:
+                    job_api_id=job["id"]
+                    log.debug("ENCODED ID E COMMAND %s %s", job_api_id,base_command)
+                    return job_api_id
+
+    def get_galaxy_command_for_docker(self,galaxy_command,dataset_galaxy_dir):
+       
+       command="cd $MESOS_SANDBOX;"+ galaxy_command
+       command=command.replace(dataset_galaxy_dir,"")
+       log.debug("COMMAND FOR DOCKER %s",command)
+       return command
 
     def post_task(self, job_wrapper):
         """ Sumbit job to Mesos cluster and return jobid
@@ -403,12 +501,6 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         except:
            log.debug("Docker_image not specified in Job config and Tool config!!")
            
-           """try:
-                log.debug(self.runner_params["gomesos_docker_project"])
-                project = str(self.runner_params["gomesos_docker_project"])
-            except KeyError:
-                log.debug("gomesosdocker_project not defined, using defaults")
-           """
         volumes = []
         try:
             if (job_destination.params["pymesos_volumes_containerPath"]):
@@ -425,7 +517,7 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         try:
             #if (job_destination.params["pymesos_volumes_containerPath"]):
              #       src_command = job_wrapper.runner_command_line
-             #       command = src_command.replace(volumes[0]["hostPath"],volumes[0]["containerPath"])
+             #       mmand = src_command.replace(volumes[0]["hostPath"],volumes[0]["containerPath"])
              #       log.debug("NEW COMMAND IS %s",command)
             #else:
                     
@@ -433,11 +525,33 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         except:
                command = job_wrapper.runner_command_line
         
-        
+        base_command=job_wrapper.get_command_line()
+        log.debug("BASE_COMMAND_LINE: %s",base_command)
+        encoded_job_id=self.get_galaxy_encoded_job_id(job_wrapper.get_command_line())
+        log.debug("ENCODED_JOB_ID: %s",encoded_job_id)
+        dataset_dir= DEFAULT_GALAXY_HOME + job_destination.params["file_path"]
+        log.debug("DATASET_DIR: %s",dataset_dir)
+        docker_command=self.get_galaxy_command_for_docker(base_command,dataset_dir)
         pymesos_jobname=self._produce_pymesos_job_name(job_wrapper.job_id)
+
+        fetch_data = []
+        inputs=[]
+        cache=False
+        extract=False
+        executable=False
+        try:
+          log.debug("PREPARE FETCH DATA!!")
+          inputs=self.get_galaxy_job_input_info(encoded_job_id)
+          galaxy_server=self.galaxy_url.replace("/galaxy/","")
+          for i in inputs:
+            fetch_data.append({"uri":galaxy_server+i["url"],"cache":cache,"extract":extract,"executable":executable,"output_file":i["file_name"]})
+
+        except:
+           log.debug("NO FETCH DATA!!")
+
         pymesos_job = {
               "name": pymesos_jobname,
-              "command": command,
+              "command": docker_command,
               "schedule":"R1//P10M", 
               "scheduleTimeZone":"LMT",
               "epsilon": "PT60S",
@@ -447,17 +561,22 @@ class PyMesosJobRunner(AsynchronousJobRunner):
               "container": {
                 "type": "DOCKER",
                 "image":job_destination.params["pymesos_default_container_id"], # self._find_container(job_wrapper).container_id,
-                "volumes": volumes
+                "volumes": volumes,
+                "forcePullImage":True
               },
               "successCount": 0,
               "errorCount": 0, 
               "cpus": mesos_task_cpu,
               "mem": mesos_task_mem,
               "disk":mesos_task_disk,
-              #"fetch": [{ "uri":"file:///home/galaxy/galaxy/database/files/000/dataset_95.dat"}], #,"https://example.com/app/cool-script.sh",
-                        #"https://example.com/app.zip", o un .json, un jpg,etc... 
+              "fetch": fetch_data,  
               "dataJob": False,
-              "environmentVariables":[],
+              "environmentVariables":[ 
+                {
+                  "name": "GALAXY_SLOTS",
+                  "value": "1"
+                }
+               ],
               "constraints":[]
             }
          
@@ -494,65 +613,105 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         
         job_destination= job_state.job_wrapper.job_destination
         job_id=job_state.job_wrapper.job_id
+        encoded_job_id=self.get_galaxy_encoded_job_id(job_state.job_wrapper.get_command_line())
+        log.debug("CREATE LOG FILE, ENCODED JOB ID %s",encoded_job_id)
+        dataset_dir= DEFAULT_GALAXY_HOME + job_destination.params["file_path"]
         job_name=self._produce_pymesos_job_name(job_id)
         if job_destination.params["docker_enabled"]:
            path_sandbox=self._obtain_chronos_job_sandbox_path(job_id)
            
-           """under path_sandbox there are stderr e stdout"""
-        log.debug("path_sandbox is %s",path_sandbox)
+           """under path_sandbox there are stderr e stdout and also output files for galaxy"""
         if path_sandbox:
             slaveX_hostname=self._obtain_chronos_jobs_nodes(job_id)
-            if slaveX_hostname.find(self.chronos_cli.slaves[0])>=0:
-               slave="http://"+self.chronos_cli.slaves[0]
+            log.debug("self.chronos_cli.slaves[0] is %s",self.chronos_cli.slaves[0])
+            slave_ip=self.chronos_cli.slaves[0].replace("http://","")
+            if slaveX_hostname.find(slave_ip)>=0:
+               slave=self.chronos_cli.slaves[0]
             else:
-               slave="http://"+self.chronos_cli.slaves[1]
+               slave=self.chronos_cli.slaves[1]
 
-            path = slave + "/files/download.json?path=" + path_sandbox
+            path = slave + "/files/download?path=" + path_sandbox
             log.debug("PATH FOR DOWNLOAD is %s", path)
-            """ content of the API callas"""
-            chroj_output_file = self.chronos_cli._call(path + "/stdout","GET")
-            chroj_error_file  = self.chronos_cli._call(path + "/stderr","GET")
- 
-            try:
-                # Read from GoChronos output_file and write it into galaxy output_file.
-                temp_file = open("temp_out_file", "w")
-                temp_file.write(chroj_output_file)
-                temp_file.close()
-                
-                out = open(job_state.output_file, "w")
-                temp_file = open('temp_out_file', 'r')
-                temp_lines=temp_file.readlines()
-                num_lines=len(temp_lines)
-                #log.debug("LINEE OUTPUT %d",num_lines)
-                for i in range(0,num_lines):
-                    if 'Starting task' in temp_lines[i]:
-                        from_index=i
-                        break
 
-                for i in range(from_index+1,num_lines):
-                        out.write(temp_lines[i])
-                out.close()
-                temp_file.close()
+            output_datasets_name=[]
+            output_datasets_name=self.get_galaxy_job_output_info (encoded_job_id)
+
+            """ content of the API calls"""
+            chroj_stdout_file = self.chronos_cli._call(path + "/stdout","GET")
+            chroj_error_file  = self.chronos_cli._call(path + "/stderr","GET")
+            try:
+             log.debug("NUMERO DI OUTPUT PRESENTI %d",len(output_datasets_name))
+             logs_file_path = job_state.output_file
+
+             for name in output_datasets_name:
+               gxy_output_file=""
+               gxy_output_file = self.chronos_cli._call(path + "/" + name["file_name"],"GET")
+               
+               log.debug("APRO IL FILE %s",gxy_output_file)
+
+
+               if gxy_output_file is not None:
+                  log.debug("IL FILE NON E VUOTO")
+
+                  #f = open(name["file_name"], "r")
+                  #log.debug("GALAXY OUT APERTO!!!")
+                  #out_f = f.read()
+                  dataset_name_path=dataset_dir+"/"+ name["file_name"]
+                  log.debug("DATASET OUTPUT FILE %s",dataset_name_path)
+                  output_file = open(dataset_name_path, "w")
+                  log.debug("DATASET OUTPUT FILE CREATO!!")
+                  #output_file = open(job_state.output_file,"w")
+                  output_file.write(gxy_output_file)
+                  output_file.close()
+                  
+                  log.debug("IL FILE NON E ANCORA VUOTO %s",gxy_output_file)
+                  logs_file = open(logs_file_path, "w")
+                  log.debug("JOB STATE OUTPUT FILE %s",logs_file_path)
+                  if isinstance(gxy_output_file, text_type):
+                    gxy_output_file = gxy_output_file.encode('utf8')
+                  logs_file.write(gxy_output_file)
+                  log.debug("JOB STATE OUTPUT FILE CREATO!!")
+                  logs_file.close()
+                  #f.close()
+              
+             # Read from Pymesoss output_file and write it into galaxy output_file.
                 
-                # Read from GoChronos error_file and write it into galaxy error file
-                
-                log_file = open(job_state.error_file, "w")
-                if (returncode != "0"):    
-                  log_file.write(chroj_error_file)
-                else:
-                  log_file.write('')
-                log_file.close()
+             """out = open(job_state.output_file, "w")
+             temp_file = open(chroj_stdout_file, 'r')
+             temp_lines=temp_file.readlines()
+             num_lines=len(temp_lines)"""
+                #log.debug("LINEE OUTPUT %d",num_lines)
+             """for i in range(0,num_lines):
+              if 'Starting task' in temp_lines[i]:
+               from_index=i
+               break
+             for i in range(from_index+1,num_lines):
+               out.write(temp_lines[i])
+               out.close()
+               temp_file.close()"""
+
+             log.debug("RETURNCODE %s", returncode)
+                 
+             # Read from GoChronos error_file and write it into galaxy error file
+             
+             log_file = open(job_state.error_file, "w")
+             if (returncode != "0"):    
+                log_file.write(chroj_error_file)
+             else:
+                log_file.write('')
+             log_file.close()
+            
                  
                 # Read from GoMesos exit_code and write it into galaxy exit_code_file.
                 #out_log = returncode  "0" OK  e "1" ERROR
-                log_file = open(job_state.exit_code_file, "w")
-                log_file.write(returncode)
-                log_file.close()
+             log_file = open(job_state.exit_code_file, "w")
+             log_file.write(returncode)
+             log_file.close()
                 
-                log.debug("CREATE OUTPUT FILE: " + str(job_state.output_file))
-                log.debug("CREATE ERROR FILE: " + str(job_state.error_file))
-                log.debug("CREATE EXIT CODE FILE: " + str(job_state.exit_code_file))
-                return True
+             log.debug("CREATE OUTPUT FILE: " + str(job_state.output_file))
+             log.debug("CREATE ERROR FILE: " + str(job_state.error_file))
+             log.debug("CREATE EXIT CODE FILE: " + str(job_state.exit_code_file))
+             return True
             except IOError as e:
                 log.error('Could not access task log file %s' % str(e))
                 log.debug("IO Error occurred when accessing the files!!")
@@ -599,7 +758,6 @@ class PyMesosJobRunner(AsynchronousJobRunner):
             elif (self._get_chronos_job_state(pymesos_job_name)).find("queued")>=0:
                 job_state.running = False
                 job_state.job_wrapper.change_state(model.Job.states.QUEUED)
-                #log.debug("SONO IN CODA!")
                 return job_state
 
 
@@ -657,4 +815,5 @@ class PyMesosJobRunner(AsynchronousJobRunner):
 
    
      
+
 
