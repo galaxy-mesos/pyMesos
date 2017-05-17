@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<!-- A sample job config that explicitly configures job running the way it is configured by default (if there is no explicit config). -->
+<job_conf>
+    <plugins>
+       <plugin id="local" type="runner" load="galaxy.jobs.runners.local:LocalJobRunner" workers="4"/>        
+       <plugin id="pymesos" type="runner" load="galaxy.jobs.runners.pymesos:PyMesosJobRunner">
+            <!-- Different DRMs handle successfully completed jobs differently,
+                 these options can be changed to handle such differences and
+                 are explained in detail on the Galaxy wiki. Defaults are shown -->
+            <param id="chronos_server">https://172.30.67.7:4443</param>
+            <param id="master_server">http://172.30.67.7:5050</param>
+            <param id="slaves_list">http://172.30.67.4:5051,http://172.30.67.5:5051</param>
+            <param id="user_chronos">admin</param>
+            <param id="password_chronos">m3sosGalaxyC.2016</param>
+            <param id="galaxy_url">http://172.30.67.22/galaxy/</param>
+       </plugin>
+       <!--<plugin id="pulsar_emb" type="runner" load="galaxy.jobs.runners.pulsar:PulsarEmbeddedJobRunner">
+          <param id="pulsar_config">/home/galaxy/pulsar/app.yml</param>
+       </plugin>-->
+    </plugins>
+    <handlers>
+        <handler id="main"/>
+    </handlers>
+    <destinations default="local">
+        <!--<destination id="pulsar_emb_dest" runner="pulsar_emb">
+         <param id="jobs_directory">/home/galaxy/pulsar/files/staging</param>
+        </destination>-->         
+        <destination id="local" runner="local"/>
+        <!--<destination id="pulsar_mq_dest" runner="pulsar_mq">
+          <param id="jobs_directory">/home/galaxy/pulsar/files/staging</param>
+        </destination> -->
+        <destination id="pymesos_container" runner="pymesos">
+            <param id="mesos_task_cpu">0.1</param>
+            <param id="mesos_task_mem">128</param>
+            <param id="mesos_task_disk">256</param>
+            <param id="docker_enabled">true</param>
+            <param id="file_path">/database/files/000/</param>
+            <param id="pymesos_default_container_id">libmesos/ubuntu</param>  <!--
+              Specify the image on which the jobs have to be executed -->
+            <!--<param id="pymesos_volumes_containerPath">/home/galaxy/galaxy</param>
+            <param id="pymesos_volumes_hostPath">/home/galaxy/galaxy</param>-->
+           
+            <param id="virtualenv">false</param>
+            <!-- If a tool execution in container requires galaxy virtualenv, 
+                 then enable it by setting the value to true.
+                 Disable venv by setting the value to false.
+             -->            
+        </destination>
+    </destinations>
+    <tools>
+      <tool id="GoChHello_id" destination="pymesos_container"/>
+      <tool id="upload1" destination="local"/>
+      <!--<tool id="hello_world" destination="pulsar_emb_dest"/>-->
+      <tool id="catdc" destination="pymesos_container"/>
+      <!--<tool id="toolshed.g2.bx.psu.edu/repos/devteam/bowtie_wrappers/bowtie_wrapper/1.2.0" destination="pulsar_emb_dest"/>-->
+      <!--<tool id="bowtie_wrapper" destination="pulsar_emb_dest"/>-->
+    </tools>
+    <limits> 
+      <limit type="destination_user_concurrent_jobs" id="pymesos">10</limit>
+      <limit type="output_size">10GB</limit>
+    </limits>
+</job_conf>
