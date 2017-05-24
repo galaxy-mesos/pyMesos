@@ -46,14 +46,32 @@
                  Disable venv by setting the value to false.
              -->            
         </destination>
+        <destination id="smalt_container" runner="pymesos">
+            <param id="mesos_task_cpu">0.1</param>
+            <param id="mesos_task_mem">128</param>
+            <param id="mesos_task_disk">256</param>
+            <param id="docker_enabled">true</param>
+            <param id="file_path">/database/files/000/</param>
+            <!--<param id="pymesos_default_container_id">apetkau/smalt-galaxy</param>
+              Specify the image on which the jobs have to be executed 
+            <param id="pymesos_volumes_containerPath">/home/galaxy/galaxy</param>
+            <param id="pymesos_volumes_hostPath">/home/galaxy/galaxy</param>-->
+
+            <param id="virtualenv">false</param>
+            <!-- If a tool execution in container requires galaxy virtualenv, 
+                 then enable it by setting the value to true.
+                 Disable venv by setting the value to false.
+            -->
+        </destination>
     </destinations>
     <tools>
       <tool id="GoChHello_id" destination="pymesos_container"/>
       <tool id="upload1" destination="local"/>
       <!--<tool id="hello_world" destination="pulsar_emb_dest"/>-->
       <tool id="catdc" destination="pymesos_container"/>
-      <!--<tool id="toolshed.g2.bx.psu.edu/repos/devteam/bowtie_wrappers/bowtie_wrapper/1.2.0" destination="pulsar_emb_dest"/>-->
-      <!--<tool id="bowtie_wrapper" destination="pulsar_emb_dest"/>-->
+      <tool id="toolshed.g2.bx.psu.edu/repos/devteam/bowtie_wrappers/bowtie_wrapper/1.2.0" destination="pymesos_container"/>
+      <tool id="bowtie_wrapper" destination="pymesos_container"/>
+      <tool id="smalt_wrapper (docker)" destination="smalt_container"/>
     </tools>
     <limits> 
       <limit type="destination_user_concurrent_jobs" id="pymesos">10</limit>
