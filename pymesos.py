@@ -62,6 +62,10 @@ MESOS_PARAM_SPECS = dict(
         map=specs.to_str_or_none,
         default=None,
     ),
+    mesos_sandbox=dict(
+        map=specs.to_str_or_none,
+        default="/mnt/mesos/sandbox/",
+    ),
 )
 class ChronosAPIError(Exception):
      pass
@@ -315,8 +319,10 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         super( PyMesosJobRunner, self ).__init__( app, nworkers, runner_param_specs=MESOS_PARAM_SPECS, **kwds )
         
         galaxy_url = self.runner_params.galaxy_url
+        self.mesos_sandbox_dir = self.runner_params.mesos_sandbox
+        log.debug("MESOS SANDBOX %s",self.mesos_sandbox_dir)
         if not galaxy_url:
-            galaxy_url = app.config.galaxy_infrastructure_url
+            galaxy_url = app.config.galaxy_infrastructure_url+"/"
         log.debug("GALAXY URL %s",galaxy_url)
         self.galaxy_url = galaxy_url
         self.galaxy_inst = galaxy.GalaxyInstance(self.galaxy_url, key='GALAXY_ADMIN_API_KEY')
@@ -465,7 +471,7 @@ class PyMesosJobRunner(AsynchronousJobRunner):
     def get_galaxy_command_for_docker(self,galaxy_command,dataset_galaxy_dir):
        
        command="cd $MESOS_SANDBOX;"+ galaxy_command
-       command=command.replace(dataset_galaxy_dir,"")
+       command=command.replace(dataset_galaxy_dir,self.mesos_sandbox_dir)
        log.debug("COMMAND FOR DOCKER %s",command)
        return command
 
@@ -491,15 +497,20 @@ class PyMesosJobRunner(AsynchronousJobRunner):
            mesos_task_mem = int(job_destination.params["mesos_task_mem"])
         except:
            mesos_task_mem = 128
-        try:
-           workingDirectory=job_wrapper.working_directory
-           job_tool=job_wrapper.tool
-           docker_image = self._find_container(job_wrapper).container_id
-           log.debug("DOCKER IMAGE: %s \n",docker_image)
-           log.debug("Job tool: %s",job_tool)
-           log.debug("work dir: %s",workingDirectory)
-        except:
-           log.debug("Docker_image not specified in Job config and Tool config!!")
+        
+        workingDirectory=job_wrapper.working_directory
+        job_tool=job_wrapper.tool
+        if self._find_container(job_wrapper):
+              log.debug("WRAPPER CONTAINER IMAGE %s",self._find_container(job_wrapper).container_id)
+              docker_image = self._find_container(job_wrapper).container_id
+        else:
+              log.debug("DOCKER IMAGE: %s \n",job_destination.params["pymesos_default_container_id"])
+              docker_image = job_destination.params["pymesos_default_container_id"]
+        log.debug("DOCKER IMAGE: %s \n",docker_image)
+        log.debug("Job tool: %s",job_tool)
+        log.debug("work dir: %s",workingDirectory)
+        #except:
+         #  log.debug("Docker_image not specified in Job config and Tool config!!")
            
         volumes = []
         try:
@@ -560,7 +571,7 @@ class PyMesosJobRunner(AsynchronousJobRunner):
               "async":False,
               "container": {
                 "type": "DOCKER",
-                "image":job_destination.params["pymesos_default_container_id"], # self._find_container(job_wrapper).container_id,
+                "image": docker_image,
                 "volumes": volumes,
                 "forcePullImage":True
               },
@@ -656,7 +667,7 @@ class PyMesosJobRunner(AsynchronousJobRunner):
                   #f = open(name["file_name"], "r")
                   #log.debug("GALAXY OUT APERTO!!!")
                   #out_f = f.read()
-                  dataset_name_path=dataset_dir+"/"+ name["file_name"]
+                  dataset_name_path=dataset_dir + name["file_name"]
                   log.debug("DATASET OUTPUT FILE %s",dataset_name_path)
                   output_file = open(dataset_name_path, "w")
                   log.debug("DATASET OUTPUT FILE CREATO!!")
