@@ -46,10 +46,6 @@ MESOS_PARAM_SPECS = dict(
         map=specs.to_str_or_none,
         default=None,
     ),
-    slaves_list=dict(
-        map=specs.to_str_or_none,
-        default=None,
-    ),
     master_server=dict(
         map=specs.to_str_or_none,
         default=None,
@@ -84,18 +80,13 @@ class ChronosClient(object):
     _user = None
     _password = None
 
-    def __init__(self,chronos_server,master_server,slaves_list=[], username=None, password=None, level='WARN'):
+    def __init__(self,chronos_server,master_server, username=None, password=None, level='WARN'):
        
         self.chronos = chronos_server
         log.debug('CHRONOS SERVER is %s', chronos_server)
         #self.master = "http://172.30.67.7:5050"
         self.master = master_server
         log.debug('MASTER SERVER is %s', master_server)
-        #self.slaves= ["http://172.30.67.5:5051","http://172.30.67.4:5051"] #slaves[i] = slave(1) always!
-        
-        self.slaves=slaves_list.split(",")
-        for slave in self.slaves:
-            log.debug('SLAVE LIST ARE %s', slave)
         if username and password:
             self._user_chronos = username
             self._password_chronos = password
@@ -129,12 +120,9 @@ class ChronosClient(object):
        """get the state info of a slave slaveX_hostname is slave(1)@172.30.67.4:5051"""
        pos=slaveX_hostname.find("@")
        slaveX=slaveX_hostname[:pos]
-       slave_ip=self.slaves[0].replace("http://","")
-       log.debug("SLAVE IP IS %s",slave_ip)
-       if slaveX_hostname.find(slave_ip)>=0:
-          slave=self.slaves[0]
-       else:
-          slave=self.slaves[1]
+       slave=slaveX_hostname[pos+1:]
+       log.debug("SLAVE IP IS %s",slave)
+       slave="http://"+ slave
        path = slave+"/"+slaveX+"/state"
        log.debug( "PATH_STATE is %s", path)
        return self._call(path,"GET")
@@ -175,26 +163,6 @@ class ChronosClient(object):
     def update(self, job_def):
         """Update an existing job by name"""
         return self.add(job_def, update=True)
-
-    def job_stat(self, name):
-        """ List stats for a job """
-        return self._call('/v1/scheduler/job/stat/%s' % name, "GET")
-
-    def scheduler_stat_99th(self):
-        return self._call('/v1/scheduler/stats/99thPercentile', 'GET')
-
-    def scheduler_stat_98th(self):
-        return self._call('/v1/scheduler/stats/98thPercentile', 'GET')
-
-    def scheduler_stat_95th(self):
-        return self._call('/v1/scheduler/stats/95thPercentile', 'GET')
-
-    def scheduler_stat_75th(self):
-        return self._call('/v1/scheduler/stats/75thPercentile', 'GET')
-
-    def scheduler_stat_median(self):
-        return self._call('/v1/scheduler/stats/median', 'GET')
-
 
     def _call(self, url, method="GET", body=None, headers={}):
         hdrs = {}
@@ -242,30 +210,13 @@ class ChronosClient(object):
                 payload = json.loads(content)
                 log.debug("Response valid json: %s" % content)
             except ValueError:
-                log.debug("Response not valid json: %s" % content)
+                log.debug("Response not  json: %s" % content)
                 payload = content
 
         if payload is None and status != 204:
             raise ChronosAPIError("Request to Chronos API failed: status: %d, response: %s" % (status, content))
 
         return payload
-
-    def _update(self, result, job):
-        job['result_fields']['status'] = result.status
-        self.logger.debug("status: %d" % status)
-        payload = None
-
-
-        if result.content:
-            try:
-                payload = json.loads(result.content)
-            except ValueError:
-                self.logger.error("Response not valid json: %s" % content)
-                payload = content
-
-        if payload is None:  
-              job['result_fields']['content']=payload 
-        return True
 
 
     def _check_fields(self, job):
@@ -325,11 +276,11 @@ class PyMesosJobRunner(AsynchronousJobRunner):
             galaxy_url = app.config.galaxy_infrastructure_url+"/"
         log.debug("GALAXY URL %s",galaxy_url)
         self.galaxy_url = galaxy_url
-        self.galaxy_inst = galaxy.GalaxyInstance(self.galaxy_url, key='GALAXY_ADMIN_API_KEY')
+        self.galaxy_admin_key="GALAXY_ADMIN_API_KEY"
+        self.galaxy_inst = galaxy.GalaxyInstance(self.galaxy_url, key=self.galaxy_admin_key)
 
         self.chronos_cli = ChronosClient(self.runner_params.chronos_server,
                                          self.runner_params.master_server,
-                                         self.runner_params.slaves_list,
                                          username=self.runner_params.user_chronos,
                                          password=self.runner_params.password_chronos)
         
@@ -349,8 +300,47 @@ class PyMesosJobRunner(AsynchronousJobRunner):
 
     def get_galaxy_dataset_info(self,id):
         return self.galaxy_inst.datasets.show_dataset(id)
-    
 
+    def get_galaxy_job_param_info(self,encoded_job_id,param_to_search):
+        job_data=self.galaxy_inst.jobs.show_job(encoded_job_id,full_details=True)
+        if job_data:
+         if param_to_search in job_data['params'].iterkeys():
+             return job_data['params'][param_to_search]
+ 
+
+    def get_galaxy_reference_data_info(self,galaxy_command,genome_index):
+        reference_data_toChronos=[]
+        tool_data_table_info={}
+        tool_data_table={}
+        tool_data_list=self.galaxy_inst.tool_data.get_data_tables()
+        for item in tool_data_list:
+          log.debug("TOOL TABLE %s", item['name']) 
+          tool_data_table_info=self.galaxy_inst.tool_data.show_data_table(item['name'])
+          if tool_data_table_info.has_key('columns'):
+           tool_data_table=dict((str(key), value) for (key, value) in tool_data_table_info.iteritems())
+        
+           if "path" in tool_data_table['columns']  and len(tool_data_table['fields'])>0:
+              base_url_path=self.galaxy_url+'api/tool_data/'+ item['name']+'/fields/'+ genome_index
+              url_path=base_url_path+"?key="+self.galaxy_admin_key
+              print url_path
+              ref_info_genome=self.chronos_cli._call(url_path,"GET")
+              print ref_info_genome
+              path_to_check=ref_info_genome['base_dir'][0]
+              print path_to_check
+              if galaxy_command.find(path_to_check)>=0:
+
+               for key in ref_info_genome['files']:
+                 #it means that right tool data table  found 
+                 #file_name=path_to_check wo 1st / +"/"+key
+                 file_name=path_to_check[1:]+"/"+key
+                 url=base_url_path+'/files/'+key+'?key='+self.galaxy_admin_key
+                 log.debug("REFERENCE FILE %s  URL%s",file_name,url)
+                 self.add_chronos_dataset(reference_data_toChronos,file_name,url)
+              break
+       
+        return reference_data_toChronos
+   
+           
     def get_galaxy_job_input_info (self,encoded_job_id):
 
        job_data=self.galaxy_inst.jobs.show_job(encoded_job_id,full_details=True)
@@ -421,19 +411,18 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         slaveX_hostname=self._obtain_chronos_jobs_nodes(job_id)
 
         chronos_task_name = "ChronosTask:" + self._produce_pymesos_job_name(job_id)
-        log.debug("chronos_task_name is %s", chronos_task_name)
+        #log.debug("chronos_task_name is %s", chronos_task_name)
         chronos_job_sandbox_path="No Path"
         state_info=self.chronos_cli._obtain_chronos_slaveX_state(slaveX_hostname)
         if state_info:
-            log.debug("SONO NELLO STATE")
             
             for framework  in state_info['completed_frameworks']:
-              log.debug("LUNGHEZZA DEI COMPLETED EXECUTORS %d",len(framework['completed_executors']))
+              #log.debug("LUNGHEZZA DEI COMPLETED EXECUTORS %d",len(framework['completed_executors']))
               for executor in framework['completed_executors']:
                      for task_item in executor['completed_tasks']:
                      
                        if (chronos_task_name == task_item['name']):
-                           log.debug("SANDBOX PATH IS %s:", executor['directory'])
+                           #log.debug("SANDBOX PATH IS %s:", executor['directory'])
                            chronos_job_sandbox_path = executor['directory']
                         
         return chronos_job_sandbox_path
@@ -468,12 +457,19 @@ class PyMesosJobRunner(AsynchronousJobRunner):
                     log.debug("ENCODED ID E COMMAND %s %s", job_api_id,base_command)
                     return job_api_id
 
-    def get_galaxy_command_for_docker(self,galaxy_command,dataset_galaxy_dir):
+    def get_galaxy_command_for_docker(self,galaxy_command,dataset_galaxy_dir,env_variables=[]):
        
-       command="cd $MESOS_SANDBOX;"+ galaxy_command
+       command=galaxy_command
+       for i in env_variables:
+          if i["name"]=="REF_INDEX_PATH":
+           #replace galaxy ref data dir with absolute container ref data dir
+           command=command.replace("/"+i["value"],self.mesos_sandbox_dir+i["value"])
+           break
        command=command.replace(dataset_galaxy_dir,self.mesos_sandbox_dir)
        log.debug("COMMAND FOR DOCKER %s",command)
        return command
+
+
 
     def post_task(self, job_wrapper):
         """ Sumbit job to Mesos cluster and return jobid
@@ -508,45 +504,34 @@ class PyMesosJobRunner(AsynchronousJobRunner):
               docker_image = job_destination.params["pymesos_default_container_id"]
         log.debug("DOCKER IMAGE: %s \n",docker_image)
         log.debug("Job tool: %s",job_tool)
-        log.debug("work dir: %s",workingDirectory)
-        #except:
-         #  log.debug("Docker_image not specified in Job config and Tool config!!")
-           
+        
         volumes = []
         try:
-            if (job_destination.params["pymesos_volumes_containerPath"]):
-             volume = job_destination.params["pymesos_volumes_containerPath"]
+         if (job_destination.params["pymesos_volumes"]):
+             volume = job_destination.params["pymesos_volumes"]
              volume = volume.split(",")
              log.debug("VOLUME is s%", volume)
              for i in volume:
-                temp = dict({"containerPath":job_destination.params["pymesos_volumes_containerPath"],              
-                             "hostPath":job_destination.params["pymesos_volumes_hostPath"],"mode":"RW"})
+                temp = dict({"containerPath":i,              
+                             "hostPath":i,"mode":"RW"})
                 volumes.append(temp)
         except:
-                log.debug("pymesos_volumes not set. Getting default volume!!")
+          log.debug("NO VOLUMES")
 
-        try:
-            #if (job_destination.params["pymesos_volumes_containerPath"]):
-             #       src_command = job_wrapper.runner_command_line
-             #       mmand = src_command.replace(volumes[0]["hostPath"],volumes[0]["containerPath"])
-             #       log.debug("NEW COMMAND IS %s",command)
-            #else:
-                    
-               command = job_wrapper.runner_command_line
-        except:
-               command = job_wrapper.runner_command_line
-        
+        #prepare galaxy command for docker and fetch data
         base_command=job_wrapper.get_command_line()
         log.debug("BASE_COMMAND_LINE: %s",base_command)
         encoded_job_id=self.get_galaxy_encoded_job_id(job_wrapper.get_command_line())
         log.debug("ENCODED_JOB_ID: %s",encoded_job_id)
         dataset_dir= DEFAULT_GALAXY_HOME + job_destination.params["file_path"]
         log.debug("DATASET_DIR: %s",dataset_dir)
-        docker_command=self.get_galaxy_command_for_docker(base_command,dataset_dir)
+        
         pymesos_jobname=self._produce_pymesos_job_name(job_wrapper.job_id)
 
         fetch_data = []
         inputs=[]
+        env_vars=[]
+        genome_data={}
         cache=False
         extract=False
         executable=False
@@ -556,9 +541,23 @@ class PyMesosJobRunner(AsynchronousJobRunner):
           galaxy_server=self.galaxy_url.replace("/galaxy/","")
           for i in inputs:
             fetch_data.append({"uri":galaxy_server+i["url"],"cache":cache,"extract":extract,"executable":executable,"output_file":i["file_name"]})
-
+          #just only if genomesource=indexed right tool data table indexes must be fetched
+          genome_data=json.loads(self.get_galaxy_job_param_info(encoded_job_id,"refGenomeSource"))
+          if genome_data.has_key('genomeSource'):
+           if genome_data['genomeSource'] == "indexed":
+              genome_index=genome_data['index']
+              reference_data_files=self.get_galaxy_reference_data_info(job_wrapper.get_command_line(),genome_index)
+              for f in reference_data_files:
+                fetch_data.append({"uri":f["url"],"cache":cache,"extract":extract,"executable":executable,"output_file":f["file_name"]})
+              ref_path=fetch_data[len(fetch_data)-1]["output_file"]
+              last_slash=ref_path.rfind("/")
+              ref_path=ref_path[:last_slash]
+              log.debug("REF PATH %s",ref_path)
+              env_vars.append({"name": "REF_INDEX_PATH", "value":ref_path})
         except:
-           log.debug("NO FETCH DATA!!")
+           log.debug("NO FETCH DATA")
+
+        docker_command=self.get_galaxy_command_for_docker(base_command,dataset_dir,env_vars)
 
         pymesos_job = {
               "name": pymesos_jobname,
@@ -582,12 +581,7 @@ class PyMesosJobRunner(AsynchronousJobRunner):
               "disk":mesos_task_disk,
               "fetch": fetch_data,  
               "dataJob": False,
-              "environmentVariables":[ 
-                {
-                  "name": "GALAXY_SLOTS",
-                  "value": "1"
-                }
-               ],
+              "environmentVariables":env_vars,
               "constraints":[]
             }
          
@@ -599,13 +593,10 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         return pymesos_jobname
     
 
-    ''' get  possible job states
-    CHRONOS job states: idle,running,queued,failed,started,finished,disabled,skipped,expired,removed
-    (TODO: check if there are more possible CHRONOS job states)
-    '''
     def _get_chronos_job_state(self, job_id):
         '''Given a job id, calls Chronos to know the state of that job'''
         chronos_jobs = self.chronos_cli._list_jobs_graph()
+        myjob_state=""
         if chronos_jobs:
             parsed_chronos_jobs = chronos_jobs.split("\n")
             for chronos_job in parsed_chronos_jobs:
@@ -614,14 +605,16 @@ class PyMesosJobRunner(AsynchronousJobRunner):
                     # properties[1] --> Job name
                     if job_id == properties[1]:
                         log.debug("TROVATO %s con state %s", job_id,properties[3])
-                        return properties[3]
+                        myjob_state=properties[3]
+                        break
+        return myjob_state
     
     def create_log_file(self,job_state,returncode):
         """ Create log files in galaxy, namely error_file, output_file, exit_code_file
             Return true, if all the file creations are successful
         """
         
-        
+   
         job_destination= job_state.job_wrapper.job_destination
         job_id=job_state.job_wrapper.job_id
         encoded_job_id=self.get_galaxy_encoded_job_id(job_state.job_wrapper.get_command_line())
@@ -634,113 +627,73 @@ class PyMesosJobRunner(AsynchronousJobRunner):
            """under path_sandbox there are stderr e stdout and also output files for galaxy"""
         if path_sandbox:
             slaveX_hostname=self._obtain_chronos_jobs_nodes(job_id)
-            log.debug("self.chronos_cli.slaves[0] is %s",self.chronos_cli.slaves[0])
-            slave_ip=self.chronos_cli.slaves[0].replace("http://","")
-            if slaveX_hostname.find(slave_ip)>=0:
-               slave=self.chronos_cli.slaves[0]
-            else:
-               slave=self.chronos_cli.slaves[1]
-
+            pos=slaveX_hostname.find("@")
+            slave=slaveX_hostname[pos+1:]
+            log.debug("SLAVE IP IS %s",slave)
+            slave="http://"+ slave
             path = slave + "/files/download?path=" + path_sandbox
             log.debug("PATH FOR DOWNLOAD is %s", path)
 
             output_datasets_name=[]
             output_datasets_name=self.get_galaxy_job_output_info (encoded_job_id)
-
+            
             """ content of the API calls"""
-            chroj_stdout_file = self.chronos_cli._call(path + "/stdout","GET")
             chroj_error_file  = self.chronos_cli._call(path + "/stderr","GET")
-            try:
-             log.debug("NUMERO DI OUTPUT PRESENTI %d",len(output_datasets_name))
-             logs_file_path = job_state.output_file
-
-             for name in output_datasets_name:
+            chroj_stdout_file = self.chronos_cli._call(path + "/stdout","GET")
+            
+            for name in output_datasets_name:
                gxy_output_file=""
                gxy_output_file = self.chronos_cli._call(path + "/" + name["file_name"],"GET")
                
-               log.debug("APRO IL FILE %s",gxy_output_file)
-
-
                if gxy_output_file is not None:
-                  log.debug("IL FILE NON E VUOTO")
-
-                  #f = open(name["file_name"], "r")
-                  #log.debug("GALAXY OUT APERTO!!!")
-                  #out_f = f.read()
                   dataset_name_path=dataset_dir + name["file_name"]
                   log.debug("DATASET OUTPUT FILE %s",dataset_name_path)
                   output_file = open(dataset_name_path, "w")
-                  log.debug("DATASET OUTPUT FILE CREATO!!")
-                  #output_file = open(job_state.output_file,"w")
+                  log.debug("DATASET OUTPUT FILE CREATO!")
                   output_file.write(gxy_output_file)
                   output_file.close()
                   
-                  log.debug("IL FILE NON E ANCORA VUOTO %s",gxy_output_file)
-                  logs_file = open(logs_file_path, "w")
-                  log.debug("JOB STATE OUTPUT FILE %s",logs_file_path)
-                  if isinstance(gxy_output_file, text_type):
-                    gxy_output_file = gxy_output_file.encode('utf8')
-                  logs_file.write(gxy_output_file)
-                  log.debug("JOB STATE OUTPUT FILE CREATO!!")
-                  logs_file.close()
-                  #f.close()
-              
-             # Read from Pymesoss output_file and write it into galaxy output_file.
-                
-             """out = open(job_state.output_file, "w")
-             temp_file = open(chroj_stdout_file, 'r')
-             temp_lines=temp_file.readlines()
-             num_lines=len(temp_lines)"""
-                #log.debug("LINEE OUTPUT %d",num_lines)
-             """for i in range(0,num_lines):
-              if 'Starting task' in temp_lines[i]:
-               from_index=i
-               break
-             for i in range(from_index+1,num_lines):
-               out.write(temp_lines[i])
-               out.close()
-               temp_file.close()"""
 
-             log.debug("RETURNCODE %s", returncode)
-                 
-             # Read from GoChronos error_file and write it into galaxy error file
-             
-             log_file = open(job_state.error_file, "w")
-             if (returncode != "0"):    
-                log_file.write(chroj_error_file)
-             else:
+            logs_file = open(job_state.output_file, "w")
+            logs_file.write(str(chroj_stdout_file))
+            log.debug("JOB STATE OUTPUT FILE CREATO")
+            logs_file.close()
+                
+            log_file = open(job_state.error_file, "w")
+            if (returncode != "0"):
+                log_file.write(str(chroj_error_file))
+                log.debug("JOB STATE ERROR FILE CREATO")
+            else:
                 log_file.write('')
-             log_file.close()
-            
-                 
-                # Read from GoMesos exit_code and write it into galaxy exit_code_file.
-                #out_log = returncode  "0" OK  e "1" ERROR
-             log_file = open(job_state.exit_code_file, "w")
-             log_file.write(returncode)
-             log_file.close()
-                
-             log.debug("CREATE OUTPUT FILE: " + str(job_state.output_file))
-             log.debug("CREATE ERROR FILE: " + str(job_state.error_file))
-             log.debug("CREATE EXIT CODE FILE: " + str(job_state.exit_code_file))
-             return True
-            except IOError as e:
-                log.error('Could not access task log file %s' % str(e))
-                log.debug("IO Error occurred when accessing the files!!")
-                return False
+            log_file.close()
+    
 
-        log.debug("NESSUN FILE SCARICATO!")
+        else:
+        #surely something was wrong if no container path sandbox
+            with open(job_state.error_file, 'w') as fil:
+                fil.write("Chronos Job %s",job_name,"= galaxy job %s",job_id,"has failed")
+            returncode="1"
+            
+        #out_log = returncode  "0" OK  e "1" ERROR
+        log_file = open(job_state.exit_code_file, "w")
+        log_file.write(returncode)
+        log_file.close()
+                
+        log.debug("CREATE OUTPUT FILE: " + str(job_state.output_file))
+        log.debug("CREATE ERROR FILE: " + str(job_state.error_file))
+        log.debug("CREATE EXIT CODE FILE: " + str(job_state.exit_code_file))
         return True
+           
+
 
     def check_watched_item(self, job_state):
-        log.debug("Checks the state of a job already submitted on GoChronos. Job state is a AsynchronousJobState\n")
+        log.debug("Checks the state of a job already submitted on Chronos. Job state is a AsynchronousJobState\n")
         log.debug("job_state.job_wrapper.job_id %d" % job_state.job_wrapper.job_id)
         pymesos_job_name=self._produce_pymesos_job_name(job_state.job_wrapper.job_id)
         response=self.chronos_cli._list(pymesos_job_name)
-         
-        
         succeeded=0
         failed=0
-        if len(response) == 1:
+        if len(response)==1:
             if response[0]['successCount']>=1: 
                     job_state.job_wrapper.change_state(model.Job.states.OK)
                     succeeded = response[0]['successCount']
@@ -760,6 +713,7 @@ class PyMesosJobRunner(AsynchronousJobRunner):
                 job_chronos_status="1"
                 self.create_log_file(job_state, job_chronos_status)
                 self.mark_as_failed(job_state)
+                self.stop_job(job_state.job_wrapper.job_id)
                 return None
             elif (self._get_chronos_job_state(pymesos_job_name)).find("running")>=0:
                 job_state.running = True
@@ -773,9 +727,11 @@ class PyMesosJobRunner(AsynchronousJobRunner):
 
 
         elif len(response) == 0:
+            log.error("There is no response Chronos Job associated to job id " + job_state.job_id)
             # there is no job responding to this job_id, it is either lost or something happened.
             self.create_log_file(job_state,"1")
             self.mark_as_failed(job_state)
+            self.stop_job(job_state.job_wrapper.job_id)
             return job_state
         else:
             # there is more than one job associated to the expected unique job id used as selector.
@@ -783,20 +739,16 @@ class PyMesosJobRunner(AsynchronousJobRunner):
             job_state.job_wrapper.change_state(model.Job.states.ERROR)
             self.create_log_file(job_state,"1")
             self.mark_as_failed(job_state)
+            self.stop_job(job_state.job_wrapper.job_id)
             return job_state
 
-        """ def fail_job(self, job_state):  NON E' DETTO CHE SERVA SOVRASCRIVERLA
-         """
-    def stop_job(self, job):
+    def stop_job(self, galaxy_job_id):
         """Attempts to delete a dispatched job to the mesos cluster"""
         try:
-            job_name=self._produce_pymesos_job_name(job.id)
+            job_name=self._produce_pymesos_job_name(galaxy_job_id)
             log.debug("STOP JOB EXECUTION OF JOB ID: " + job_name)
             self.chronos_cli.delete(job_name) 
-            
-            # TODO assert whether job parallelism == 0
-            # assert not job_to_delete.exists(), "Could not delete job,"+job.job_runner_external_id+" it still exists"
-            log.debug("(%s) Terminated at user's request" % (job.id))
+            log.debug("(%s)=(%s) Terminated at user's request" % (galaxy_job_id) % (job_name))
         except Exception as e:
             log.debug("(%s) User killed running job, but error encountered during termination NO JOB STOPPED: %s" % (
                 job.id,e))
