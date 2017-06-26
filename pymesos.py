@@ -58,6 +58,10 @@ MESOS_PARAM_SPECS = dict(
         map=specs.to_str_or_none,
         default=None,
     ),
+    galaxy_api_key=dict(
+        map=specs.to_str_or_none,
+        default="GALAXY_ADMIN_API_KEY",
+    ),
     mesos_sandbox=dict(
         map=specs.to_str_or_none,
         default="/mnt/mesos/sandbox/",
@@ -276,7 +280,7 @@ class PyMesosJobRunner(AsynchronousJobRunner):
             galaxy_url = app.config.galaxy_infrastructure_url+"/"
         log.debug("GALAXY URL %s",galaxy_url)
         self.galaxy_url = galaxy_url
-        self.galaxy_admin_key="GALAXY_ADMIN_API_KEY"
+        self.galaxy_admin_key=self.runner_params.galaxy_api_key
         self.galaxy_inst = galaxy.GalaxyInstance(self.galaxy_url, key=self.galaxy_admin_key)
 
         self.chronos_cli = ChronosClient(self.runner_params.chronos_server,
@@ -535,27 +539,30 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         cache=False
         extract=False
         executable=False
-        try:
-          log.debug("PREPARE FETCH DATA!!")
-          inputs=self.get_galaxy_job_input_info(encoded_job_id)
-          galaxy_server=self.galaxy_url.replace("/galaxy/","")
-          for i in inputs:
+        
+        log.debug("PREPARE FETCH DATA!!")
+        inputs=self.get_galaxy_job_input_info(encoded_job_id)
+        galaxy_server=self.galaxy_url.replace("/galaxy/","")
+        for i in inputs:
             fetch_data.append({"uri":galaxy_server+i["url"],"cache":cache,"extract":extract,"executable":executable,"output_file":i["file_name"]})
-          #just only if genomesource=indexed right tool data table indexes must be fetched
-          genome_data=json.loads(self.get_galaxy_job_param_info(encoded_job_id,"refGenomeSource"))
-          if genome_data.has_key('genomeSource'):
+        #just only if genomesource=indexed right tool data table indexes must be fetched
+        try:
+         genome_data=json.loads(self.get_galaxy_job_param_info(encoded_job_id,"refGenomeSource"))
+         if genome_data.has_key('genomeSource'):
            if genome_data['genomeSource'] == "indexed":
               genome_index=genome_data['index']
               reference_data_files=self.get_galaxy_reference_data_info(job_wrapper.get_command_line(),genome_index)
               for f in reference_data_files:
                 fetch_data.append({"uri":f["url"],"cache":cache,"extract":extract,"executable":executable,"output_file":f["file_name"]})
-              ref_path=fetch_data[len(fetch_data)-1]["output_file"]
-              last_slash=ref_path.rfind("/")
-              ref_path=ref_path[:last_slash]
-              log.debug("REF PATH %s",ref_path)
-              env_vars.append({"name": "REF_INDEX_PATH", "value":ref_path})
+              if len(reference_data_files)>0:
+               ref_path=fetch_data[len(fetch_data)-1]["output_file"]
+               last_slash=ref_path.rfind("/")
+               ref_path=ref_path[:last_slash]
+               log.debug("REF PATH %s",ref_path)
+               env_vars.append({"name": "REF_INDEX_PATH", "value":ref_path})
+        
         except:
-           log.debug("NO FETCH DATA")
+             log.debug("NO REFERENCE FETCH DATA")
 
         docker_command=self.get_galaxy_command_for_docker(base_command,dataset_dir,env_vars)
 
@@ -566,6 +573,7 @@ class PyMesosJobRunner(AsynchronousJobRunner):
               "scheduleTimeZone":"LMT",
               "epsilon": "PT60S",
               "owner": None,
+              "retries":0, #if more, if job fails  Galaxy get in wait
               "shell":True,
               "async":False,
               "container": {
@@ -604,8 +612,11 @@ class PyMesosJobRunner(AsynchronousJobRunner):
                     properties = chronos_job.split(",")
                     # properties[1] --> Job name
                     if job_id == properties[1]:
-                        log.debug("TROVATO %s con state %s", job_id,properties[3])
-                        myjob_state=properties[3]
+                        if properties[2].find("failure")>=0:
+                          myjob_state=properties[2]
+                        else:
+                          myjob_state=properties[3]
+                        log.debug("TROVATO %s con state %s", job_id,myjob_state)
                         break
         return myjob_state
     
@@ -655,7 +666,8 @@ class PyMesosJobRunner(AsynchronousJobRunner):
                   
 
             logs_file = open(job_state.output_file, "w")
-            logs_file.write(str(chroj_stdout_file))
+            #logs_file.write(str(chroj_stdout_file)) really is more usefull stderr output
+            logs_file.write(str(chroj_error_file))
             log.debug("JOB STATE OUTPUT FILE CREATO")
             logs_file.close()
                 
@@ -695,11 +707,11 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         failed=0
         if len(response)==1:
             if response[0]['successCount']>=1: 
-                    job_state.job_wrapper.change_state(model.Job.states.OK)
                     succeeded = response[0]['successCount']
+                    log.debug("PASSATO DA SUCCESSCOUNT %d",succeeded)
             if response[0]['errorCount']>=1: 
-                    job_state.job_wrapper.change_state(model.Job.states.ERROR)
                     failed = response[0]['errorCount']
+                    log.debug("PASSATO DA ERRORCOUNT %d",failed)
             if succeeded:
                 job_state.running = False
                 job_state.job_wrapper.change_state(model.Job.states.OK)
@@ -707,13 +719,12 @@ class PyMesosJobRunner(AsynchronousJobRunner):
                 self.create_log_file(job_state, job_chronos_status)
                 self.mark_as_finished(job_state)
                 return None
-            elif failed:
+            elif failed or (self._get_chronos_job_state(pymesos_job_name)).find("failure")>=0:
                 job_state.running = False
                 job_state.job_wrapper.change_state(model.Job.states.ERROR)
                 job_chronos_status="1"
                 self.create_log_file(job_state, job_chronos_status)
                 self.mark_as_failed(job_state)
-                self.stop_job(job_state.job_wrapper.job_id)
                 return None
             elif (self._get_chronos_job_state(pymesos_job_name)).find("running")>=0:
                 job_state.running = True
@@ -731,7 +742,6 @@ class PyMesosJobRunner(AsynchronousJobRunner):
             # there is no job responding to this job_id, it is either lost or something happened.
             self.create_log_file(job_state,"1")
             self.mark_as_failed(job_state)
-            self.stop_job(job_state.job_wrapper.job_id)
             return job_state
         else:
             # there is more than one job associated to the expected unique job id used as selector.
@@ -739,8 +749,26 @@ class PyMesosJobRunner(AsynchronousJobRunner):
             job_state.job_wrapper.change_state(model.Job.states.ERROR)
             self.create_log_file(job_state,"1")
             self.mark_as_failed(job_state)
-            self.stop_job(job_state.job_wrapper.job_id)
             return job_state
+
+    def fail_job( self, job_state):
+        """Seperated out so we can use the worker threads for it."""
+        with open(job_state.error_file, 'r') as outfile:
+            stdout_content = outfile.read()
+
+        if getattr(job_state, 'stop_job', True):
+            self.stop_job(self.sa_session.query(self.app.model.Job).get(job_state.job_wrapper.job_id))
+        self._handle_runner_state('failure', job_state)
+        # Not convinced this is the best way to indicate this state, but
+        # something necessary
+        if not job_state.runner_state_handled:
+            job_state.job_wrapper.fail(
+                message=getattr(job_state, 'fail_message', 'Job failed'),
+                stdout="See stderr for job failure", stderr=stdout_content
+            )
+        
+       
+
 
     def stop_job(self, galaxy_job_id):
         """Attempts to delete a dispatched job to the mesos cluster"""
@@ -748,10 +776,10 @@ class PyMesosJobRunner(AsynchronousJobRunner):
             job_name=self._produce_pymesos_job_name(galaxy_job_id)
             log.debug("STOP JOB EXECUTION OF JOB ID: " + job_name)
             self.chronos_cli.delete(job_name) 
-            log.debug("(%s)=(%s) Terminated at user's request" % (galaxy_job_id) % (job_name))
+            log.debug("Terminated at user's request %s" ,job_name)
         except Exception as e:
             log.debug("(%s) User killed running job, but error encountered during termination NO JOB STOPPED: %s" % (
-                job.id,e))
+                job_name,e))
 
     def recover(self, job, job_wrapper):
         """Recovers jobs stuck in the queued/running state when Galaxy started"""
