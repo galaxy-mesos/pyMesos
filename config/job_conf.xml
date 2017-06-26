@@ -12,6 +12,7 @@
             <param id="user_chronos">admin</param>
             <param id="password_chronos">m3sosGalaxyC.2016</param>
             <param id="galaxy_url">http://172.30.67.22/galaxy/</param>
+            <param id="galaxy_api_key">GALAXY_ADMIN_API_KEY</param>
        </plugin>
        <!--<plugin id="pulsar_emb" type="runner" load="galaxy.jobs.runners.pulsar:PulsarEmbeddedJobRunner">
           <param id="pulsar_config">/home/galaxy/pulsar/app.yml</param>
