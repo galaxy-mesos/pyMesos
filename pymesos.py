@@ -573,7 +573,6 @@ class PyMesosJobRunner(AsynchronousJobRunner):
               "scheduleTimeZone":"LMT",
               "epsilon": "PT60S",
               "owner": None,
-              "retries":0, #if more, if job fails  Galaxy get in wait
               "shell":True,
               "async":False,
               "container": {
@@ -612,13 +611,8 @@ class PyMesosJobRunner(AsynchronousJobRunner):
                     properties = chronos_job.split(",")
                     # properties[1] --> Job name
                     if job_id == properties[1]:
-                        if properties[2].find("failure")>=0:
-                          myjob_state=properties[2]
-                        else:
-                          myjob_state=properties[3]
-                        log.debug("TROVATO %s con state %s", job_id,myjob_state)
-                        break
-        return myjob_state
+                        log.debug("TROVATO %s con state %s", job_id,properties[3])
+                        return properties[3]
     
     def create_log_file(self,job_state,returncode):
         """ Create log files in galaxy, namely error_file, output_file, exit_code_file
@@ -672,7 +666,7 @@ class PyMesosJobRunner(AsynchronousJobRunner):
             logs_file.close()
                 
             log_file = open(job_state.error_file, "w")
-            if (returncode != "0"):
+            if (returncode != "ok"):
                 log_file.write(str(chroj_error_file))
                 log.debug("JOB STATE ERROR FILE CREATO")
             else:
@@ -684,7 +678,7 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         #surely something was wrong if no container path sandbox
             with open(job_state.error_file, 'w') as fil:
                 fil.write("Chronos Job %s",job_name,"= galaxy job %s",job_id,"has failed")
-            returncode="1"
+            returncode="error"
             
         #out_log = returncode  "0" OK  e "1" ERROR
         log_file = open(job_state.exit_code_file, "w")
@@ -708,46 +702,39 @@ class PyMesosJobRunner(AsynchronousJobRunner):
         if len(response)==1:
             if response[0]['successCount']>=1: 
                     succeeded = response[0]['successCount']
-                    log.debug("PASSATO DA SUCCESSCOUNT %d",succeeded)
             if response[0]['errorCount']>=1: 
                     failed = response[0]['errorCount']
-                    log.debug("PASSATO DA ERRORCOUNT %d",failed)
+                    
             if succeeded:
                 job_state.running = False
                 job_state.job_wrapper.change_state(model.Job.states.OK)
-                job_chronos_status="0"
-                self.create_log_file(job_state, job_chronos_status)
+                #job_chronos_status="0"
+                self.create_log_file(job_state, model.Job.states.OK)
                 self.mark_as_finished(job_state)
                 return None
-            elif failed or (self._get_chronos_job_state(pymesos_job_name)).find("failure")>=0:
-                job_state.running = False
-                job_state.job_wrapper.change_state(model.Job.states.ERROR)
-                job_chronos_status="1"
-                self.create_log_file(job_state, job_chronos_status)
-                self.mark_as_failed(job_state)
-                return None
-            elif (self._get_chronos_job_state(pymesos_job_name)).find("running")>=0:
+            elif not succeeded and not failed:
                 job_state.running = True
                 job_state.job_wrapper.change_state(model.Job.states.RUNNING)
                 return job_state
-
-            elif (self._get_chronos_job_state(pymesos_job_name)).find("queued")>=0:
+            elif failed:
                 job_state.running = False
-                job_state.job_wrapper.change_state(model.Job.states.QUEUED)
-                return job_state
-
+                job_state.job_wrapper.change_state(model.Job.states.ERROR)
+                #job_chronos_status="1"
+                self.create_log_file(job_state,model.Job.states.ERROR)
+                self.mark_as_failed(job_state)
+                return None
 
         elif len(response) == 0:
             log.error("There is no response Chronos Job associated to job id " + job_state.job_id)
             # there is no job responding to this job_id, it is either lost or something happened.
-            self.create_log_file(job_state,"1")
+            self.create_log_file(job_state,model.Job.states.ERROR)
             self.mark_as_failed(job_state)
             return job_state
         else:
             # there is more than one job associated to the expected unique job id used as selector.
             log.error("There is more than one Chronos Job associated to job id " + job_state.job_id)
             job_state.job_wrapper.change_state(model.Job.states.ERROR)
-            self.create_log_file(job_state,"1")
+            self.create_log_file(job_state,model.Job.states.ERROR)
             self.mark_as_failed(job_state)
             return job_state
 
